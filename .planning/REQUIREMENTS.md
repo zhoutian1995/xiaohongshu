@@ -63,6 +63,16 @@
 - **MON-02**: API 端点速率限制
 - **MON-03**: 任务执行成本追踪（LLM API 用量）
 
+### Browser Backend Spike
+
+- [ ] **SPIKE-OBSCURA-01**: 验证 Playwright `connectOverCDP` 可连接 Obscura 并打开页面
+- [ ] **SPIKE-OBSCURA-02**: 验证最小 XHS 页面访问、登录态保存和跨运行复用
+- [ ] **SPIKE-OBSCURA-03**: 验证 xhs-mcp 是否能配置或改造为使用 Obscura CDP；如不能，明确最小改造范围
+- [ ] **SPIKE-OBSCURA-04**: 对比 Obscura 与当前浏览器后端的内存占用、稳定性、成功率
+- [ ] **SPIKE-OBSCURA-05**: 形成采用/不采用决策；只有全部 gate 通过才允许进入后续实现路线图
+
+**Obscura spike gate:** 只有 `serve` 启动、Playwright CDP 连接、最小 XHS 登录/搜索/详情、session 复用、内存和稳定性对比全部通过，才考虑进入后续实现路线图。Obscura 不进入 v1 Phase 1-5 主线，也不解决当前 Phase 1-3 blocker。
+
 ## Out of Scope
 
 | Feature | Reason |
@@ -75,6 +85,7 @@
 | 移动端适配 | 先做桌面端 |
 | Docker 容器化 | 2GB 服务器跑不了 Docker |
 | Redis 队列 | SQLite 轮询对单用户足够 |
+| Obscura 浏览器后端 | v2 Spike / Backlog 实验项；v1 继续使用 xhs-mcp 主路径 |
 
 ## Traceability
 

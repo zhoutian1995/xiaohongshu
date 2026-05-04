@@ -134,6 +134,26 @@ export function getNextQueuedJob(): any | undefined {
   return getDb().prepare("SELECT * FROM jobs WHERE run_status = 'queued' ORDER BY created_at ASC LIMIT 1").get()
 }
 
+export function claimNextJob(): any | undefined {
+  const database = getDb()
+  const claim = database.transaction(() => {
+    const row = database.prepare(
+      "SELECT * FROM jobs WHERE run_status = 'queued' ORDER BY created_at ASC LIMIT 1"
+    ).get() as any
+    if (!row) return undefined
+    const result = database.prepare(
+      "UPDATE jobs SET run_status = 'spawning', sandbox_pid = ? WHERE id = ? AND run_status = 'queued'"
+    ).run(process.pid, row.id)
+    if (result.changes === 0) return undefined
+    row.run_status = 'spawning'
+    row.sandbox_pid = process.pid
+    row.store_profile = JSON.parse(row.store_profile)
+    row.budget_json = JSON.parse(row.budget_json || '{}')
+    return row
+  })
+  return claim()
+}
+
 // --- Artifacts ---
 
 export function saveArtifact(id: string, jobId: string, type: string, data: string, repairAttempt = 0): void {

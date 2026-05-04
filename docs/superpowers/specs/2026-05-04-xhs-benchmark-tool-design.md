@@ -400,6 +400,36 @@ interface TimelineEvent {
 
 风险控制措施不变：使用小号、请求间隔 ≥ 2s、MVP 不下载图片/视频。
 
+## Future Spike: Obscura Browser Backend
+
+Obscura 是一个轻量 headless browser / CDP server 候选，可作为后续浏览器后端优化实验项。它的价值不在于替代 Agent/Sandbox 架构，而是验证是否能用更轻的本地 CDP 后端承载 Playwright 或 xhs-mcp 的浏览器访问。
+
+**v1 不接入 Obscura。** 当前 Phase 1-5 仍以 Agent Core、xhs-mcp 数据采集、Agent Pipeline、Frontend、E2E 稳定性为主线。Obscura 不解决当前 Phase 1-3 blocker：CLI 入口点、JSON 安全、SQL 注入、环境变量白名单、xhs-mcp 工具集成和 Agent 预算/验证流程仍必须按现有路线完成。
+
+### 可借鉴点
+
+- 进程隔离：参考 Obscura 的独立 browser server 模式，保持浏览器生命周期与 Agent Worker 解耦
+- CLI 超时：将 `serve` 类进程的启动超时、运行超时、停止逻辑纳入后续评估
+- 退出码：借鉴明确退出码语义，区分启动失败、运行失败、超时和外部终止
+- 日志收集：保留 browser server stdout/stderr，便于定位 CDP 连接、页面加载和会话恢复问题
+
+### 风险与未知
+
+- xhs-mcp 兼容性：当前 v1 以 xhs-mcp 为数据采集主路径，需要验证其是否支持外部 CDP endpoint 或是否需要 fork 改造
+- 小红书登录态：必须验证 cookies/session 能否稳定跨运行复用，且不会破坏现有登录预检流程
+- CDP 行为差异：Playwright `connectOverCDP` 能连接不代表 XHS 搜索、详情页和反爬行为一致
+- 运维复杂度：新增 Obscura 进程管理、端口管理、健康检查和日志轮转，会提高本地运行复杂度
+
+### Spike 通过标准
+
+只有以下条件全部通过，才考虑将 Obscura 纳入后续实现路线图：
+
+1. Obscura `serve` 可启动本地 CDP endpoint
+2. Playwright 能通过 `connectOverCDP` 打开普通网页
+3. 最小 XHS 登录、搜索、详情脚本跑通
+4. cookies/session 可跨运行复用
+5. 内存占用、稳定性、任务成功率优于当前浏览器后端
+
 ## UI 进度展示
 
 从 v2.1 的"4 阶段卡片"改为 **Agent Timeline**：

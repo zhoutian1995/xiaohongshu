@@ -12,11 +12,15 @@
 
 Decimal phases appear between their surrounding integers in numeric order.
 
-- [ ] **Phase 1: Agent Core** - 修复关键阻塞项：CLI 入口点、JSON 安全、SQL 注入、Zod 验证、环境变量白名单
-- [ ] **Phase 2: Data Collection** - 集成 xhs-mcp，连接小红书数据源，建立可靠的数据采集管道
-- [ ] **Phase 3: Agent Pipeline** - 打通端到端执行：预算执行、产物验证、重试修复、超时处理
-- [ ] **Phase 4: Frontend + SSE UX** - 按参考设计重做前端视觉和完善交互（保留已有数据流），同时加入 SSE 心跳和断线重连
+- [x] **Phase 1: Agent Core** - 修复关键阻塞项：CLI 入口点、JSON 安全、SQL 注入、Zod 验证、环境变量白名单
+- [x] **Phase 2: Data Collection** - 集成 xhs-mcp，连接小红书数据源，建立可靠的数据采集管道
+- [x] **Phase 3: Agent Pipeline** - 打通端到端执行：预算执行、产物验证、重试修复、超时处理
+- [x] **Phase 4: Frontend + SSE UX** - 按参考设计重做前端视觉和完善交互（保留已有数据流），同时加入 SSE 心跳和断线重连
 - [ ] **Phase 5: E2E / Release Hardening** - 端到端自动化测试 + 部署前稳定性收尾
+
+## v2 / Backlog Spikes
+
+- [ ] **Spike: Obscura as lightweight browser backend** - 验证 Obscura `serve` 作为本地 CDP 后端是否能被 Playwright 和 xhs-mcp 使用；仅作为 Phase 5 之后的浏览器后端优化候选，不进入 v1 Phase 1-5 主线，不解决当前 Phase 1-3 blocker
 
 ## Phase Details
 
@@ -25,7 +29,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 **Depends on**: Nothing (first phase)
 **Requirements**: CORE-01, CORE-02, CORE-03, CORE-04, CORE-05, INFRA-02
 **Success Criteria** (what must be TRUE):
-  1. 通过 `JOB_ID` 环境变量或 `--job-id` 参数启动 Agent Runner，进程正常执行 runAgent() 并写入 timeline 日志
+  1. ~~通过 `JOB_ID` 环境变量或 `--job-id` 参数启动 Agent Runner，进程正常执行 runAgent() 并写入 timeline 日志~~ ✓
   2. 发送畸形 JSON 给 Agent Runner（模拟 LLM 返回非法 tool call 参数），进程不崩溃，记录解析错误并继续运行
   3. POST /api/jobs 收到非法请求体（缺少必填字段、mode 枚举值错误）时返回 400 + 明确错误信息，合法请求正常创建任务
   4. 沙盒子进程的环境变量只包含白名单条目（PATH, HOME, DATABASE_PATH, ZHIPU_API_KEY 等），不包含完整 process.env
@@ -33,8 +37,8 @@ Decimal phases appear between their surrounding integers in numeric order.
 **Plans**: 2 plans
 
 Plans:
-- [ ] 01-01-PLAN.md -- CLI 入口点 + 安全加固（JSON.parse、SQL 白名单、环境变量白名单、gitignore）
-- [ ] 01-02-PLAN.md -- POST /api/jobs Zod schema 验证
+- [x] 01-01-PLAN.md -- CLI 入口点 + 安全加固（JSON.parse、SQL 白名单、环境变量白名单、gitignore）
+- [x] 01-02-PLAN.md -- POST /api/jobs Zod schema 验证
 
 ### Phase 2: Data Collection
 **Goal**: Agent 能通过 xhs-mcp 搜索小红书笔记、获取用户资料、获取笔记详情，数据经过验证后进入分析流程
@@ -82,7 +86,25 @@ Plans:
 **Success Criteria** (what must be TRUE):
   1. 自动化测试覆盖核心路径：创建任务 -> Agent 执行完成 -> 产物写入数据库 -> 前端可查询展示结果
   2. 无已知 Critical/High severity 问题遗留
-**Plans**: TBD
+**Plans**: 3 plans
+
+Plans:
+- [ ] 05-01-PLAN.md -- 修复 H-02 (claimNextJob 原子领取) + H-06 (env 检查) + vitest 配置
+- [ ] 05-02-PLAN.md -- 修复 H-05 (API 认证 middleware) + middleware 单元测试
+- [ ] 05-03-PLAN.md -- 单元测试 (artifact-validator, tool-registry) + 集成测试 (核心 job 生命周期)
+
+### v2 Spike: Obscura as lightweight browser backend
+**Goal**: 验证 Obscura 是否适合作为更轻量的浏览器/CDP 后端，供 Playwright 或 xhs-mcp 连接使用
+**Depends on**: Phase 5
+**Requirements**: SPIKE-OBSCURA-01, SPIKE-OBSCURA-02, SPIKE-OBSCURA-03, SPIKE-OBSCURA-04, SPIKE-OBSCURA-05
+**Success Criteria** (what must be TRUE):
+  1. Obscura `serve` 可启动本地 CDP endpoint，启动失败、超时和退出码可被脚本捕获
+  2. Playwright 能通过 `connectOverCDP` 连接 Obscura 并打开页面
+  3. 最小 XHS 登录/搜索/详情脚本跑通
+  4. cookies/session 可跨运行复用
+  5. 内存占用、稳定性、任务成功率优于当前浏览器后端
+  6. 形成采用/不采用决策；只有上述全部通过，才考虑进入后续实现路线图
+**Notes**: v1 仍以 xhs-mcp 为数据采集主路径。本 spike 不在 Phase 1-5 中引入 Rust 构建、Obscura 进程管理或 xhs-mcp fork 工作。
 
 ## Progress
 
@@ -91,8 +113,8 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Agent Core | 0/2 | Planned | - |
-| 2. Data Collection | 0/? | Not started | - |
-| 3. Agent Pipeline | 0/? | Not started | - |
-| 4. Frontend + SSE UX | 0/? | Not started | - |
-| 5. E2E / Release Hardening | 0/? | Not started | - |
+| 1. Agent Core | 2/2 | Done | 2026-05-04 |
+| 2. Data Collection | 1/1 | Done | 2026-05-04 |
+| 3. Agent Pipeline | 1/1 | Done | 2026-05-04 |
+| 4. Frontend + SSE UX | 1/1 | Done | 2026-05-04 |
+| 5. E2E / Release Hardening | 0/3 | In Progress | - |

@@ -1,5 +1,5 @@
 import * as db from './lib/db'
-const { getNextQueuedJob, updateJobStatus, insertTimelineEvent, getJob, getArtifacts } = db
+const { claimNextJob, updateJobStatus, insertTimelineEvent, getJob, getArtifacts } = db
 import { spawnSandbox } from './lib/sandbox-executor'
 import { validateJobArtifacts } from './lib/artifact-validator'
 import { FAST_MODE_LIMITS, DEEP_MODE_LIMITS } from './lib/types'
@@ -8,6 +8,14 @@ const POLL_INTERVAL = 2000
 const MAX_REPAIR_ATTEMPTS = 1
 
 async function main() {
+  const REQUIRED_ENV_VARS = ['ZHIPU_API_KEY', 'DATABASE_PATH'] as const
+  for (const key of REQUIRED_ENV_VARS) {
+    if (!process.env[key]) {
+      console.error(`[scheduler] FATAL: Missing required env var: ${key}`)
+      process.exit(1)
+    }
+  }
+
   console.log('[scheduler] Starting Agent Scheduler...')
 
   let running = true
@@ -22,7 +30,7 @@ async function main() {
 
   while (running) {
     try {
-      const job = getNextQueuedJob()
+      const job = claimNextJob()
       if (job) {
         console.log(`[scheduler] Picking up job: ${job.id}`)
         await processJob(job.id)
