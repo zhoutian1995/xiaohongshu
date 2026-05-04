@@ -73,13 +73,16 @@ jobs:
           set -euo pipefail
           cd /home/admin/project
 
-          # Backup data + env
+          # Backup data + env + node_modules
           mkdir -p /tmp/xhs-backup
           if [ -d "xiaohongshu/data" ]; then
             cp -r xiaohongshu/data /tmp/xhs-backup/ 2>/dev/null || true
           fi
           if [ -f "xiaohongshu/.env" ]; then
             cp xiaohongshu/.env /tmp/xhs-backup/.env 2>/dev/null || true
+          fi
+          if [ -d "xiaohongshu/node_modules" ]; then
+            mv xiaohongshu/node_modules /tmp/xhs-backup/node_modules 2>/dev/null || true
           fi
 
           # Download latest code
@@ -106,10 +109,13 @@ jobs:
           if [ -f "/tmp/xhs-backup/.env" ]; then
             cp /tmp/xhs-backup/.env xiaohongshu-next/.env
           fi
+          if [ -d "/tmp/xhs-backup/node_modules" ]; then
+            mv /tmp/xhs-backup/node_modules xiaohongshu-next/node_modules
+          fi
 
-          # Install + build
+          # Install (reuse cached node_modules) + build
           cd xiaohongshu-next
-          npm install --omit=dev 2>&1 | tail -5
+          npm install --omit=dev 2>&1 | tail -10
           npx next build --webpack 2>&1
           cd ..
 
