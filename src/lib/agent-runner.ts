@@ -62,15 +62,7 @@ export async function runAgent(jobId: string): Promise<void> {
       }
 
       // Add assistant message to conversation
-      messages.push({
-        role: 'assistant',
-        content: msg.content ?? null,
-        tool_calls: msg.tool_calls?.map(tc => ({
-          id: tc.id,
-          type: 'function' as const,
-          function: { name: tc.function.name, arguments: tc.function.arguments },
-        })),
-      })
+      messages.push(msg as any)
 
       // No tool calls — agent is done
       if (!msg.tool_calls || msg.tool_calls.length === 0) {
