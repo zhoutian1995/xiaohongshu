@@ -1,0 +1,18 @@
+# dependencies
+node_modules/
+.next/
+
+# database
+data/
+
+# xhs-mcp session & cache
+.xhs-mcp/
+
+# environment variables
+.env.local
+.env*.local
+
+# misc
+.DS_Store
+*.tsbuildinfo
+next-env.d.ts
