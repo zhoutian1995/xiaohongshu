@@ -58,12 +58,30 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+    - uses: actions/checkout@v4
       with:
         ref: ${{ github.event.head_commit.id }}
 
-    - name: Deploy to server
+    - uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+
+    - name: Install and build
+      run: |
+        npm install
+        npx next build --webpack
+
+    - name: Deploy to server via rsync
+      uses: burnett01/rsync-deployments@6.0.0
+      with:
+        switches: -avzr --delete --exclude='data' --exclude='.env'
+        path: ./
+        remote_path: /home/admin/project/xiaohongshu/
+        remote_host: ${{ secrets.SERVER_HOST }}
+        remote_user: ${{ secrets.SERVER_USER }}
+        remote_key: ${{ secrets.SSH_PRIVATE_KEY }}
+
+    - name: Restart services
       uses: appleboy/ssh-action@v1
       with:
         host: ${{ secrets.SERVER_HOST }}
@@ -71,90 +89,13 @@ jobs:
         key: ${{ secrets.SSH_PRIVATE_KEY }}
         script: |
           set -euo pipefail
-          cd /home/admin/project
+          cd /home/admin/project/xiaohongshu
 
-          # Backup data + env + node_modules
-          mkdir -p /tmp/xhs-backup
-          if [ -d "xiaohongshu/data" ]; then
-            cp -r xiaohongshu/data /tmp/xhs-backup/ 2>/dev/null || true
-          fi
-          if [ -f "xiaohongshu/.env" ]; then
-            cp xiaohongshu/.env /tmp/xhs-backup/.env 2>/dev/null || true
-          fi
-          if [ -d "xiaohongshu/node_modules" ]; then
-            mv xiaohongshu/node_modules /tmp/xhs-backup/node_modules 2>/dev/null || true
-          fi
-
-          # Download latest code
-          rm -rf xiaohongshu-next /tmp/xhs-extract /tmp/xhs.zip
-          mkdir -p xiaohongshu-next /tmp/xhs-extract
-          curl -fsSL --retry 3 --retry-delay 2 \
-            -H "Authorization: Bearer ${{ github.token }}" \
-            -H "Accept: application/vnd.github+json" \
-            -H "X-GitHub-Api-Version: 2022-11-28" \
-            "https://api.github.com/repos/${{ github.repository }}/zipball/main" \
-            -o /tmp/xhs.zip
-          test -s /tmp/xhs.zip
-          unzip -tq /tmp/xhs.zip
-          unzip -q /tmp/xhs.zip -d /tmp/xhs-extract
-          EXTRACTED=$(find /tmp/xhs-extract -mindepth 1 -maxdepth 1 -type d | head -1)
-          cp -r "$EXTRACTED"/* xiaohongshu-next/
-          cp -r "$EXTRACTED"/.[!.]* xiaohongshu-next/ 2>/dev/null || true
-
-          # Restore backup
-          if [ -d "/tmp/xhs-backup/data" ]; then
-            mkdir -p xiaohongshu-next/data
-            cp -r /tmp/xhs-backup/data/* xiaohongshu-next/data/ 2>/dev/null || true
-          fi
-          if [ -f "/tmp/xhs-backup/.env" ]; then
-            cp /tmp/xhs-backup/.env xiaohongshu-next/.env
-          fi
-          if [ -d "/tmp/xhs-backup/node_modules" ]; then
-            mv /tmp/xhs-backup/node_modules xiaohongshu-next/node_modules
-          fi
-
-          # Install (reuse cached node_modules) + build
-          cd xiaohongshu-next
-          npm install --omit=dev 2>&1 | tail -10
-          npx next build --webpack 2>&1
-          cd ..
-
-          # Swap directories
-          rm -rf xiaohongshu-prev
-          if [ -d "xiaohongshu" ]; then
-            mv xiaohongshu xiaohongshu-prev
-          fi
-          mv xiaohongshu-next xiaohongshu
-
-          # Restart services
           pm2 delete xiaohongshu-web 2>/dev/null || true
           pm2 delete xiaohongshu-worker 2>/dev/null || true
 
-          cd xiaohongshu
-
-          if ! pm2 start "npx next start -p 3002" --name xiaohongshu-web; then
-            echo "Web start failed, rolling back"
-            cd ..
-            rm -rf xiaohongshu
-            mv xiaohongshu-prev xiaohongshu
-            cd xiaohongshu
-            pm2 start "npx next start -p 3002" --name xiaohongshu-web
-            exit 1
-          fi
-
-          if ! pm2 start "npx tsx src/worker.ts" --name xiaohongshu-worker; then
-            echo "Worker start failed"
-            pm2 delete xiaohongshu-web 2>/dev/null || true
-            cd ..
-            rm -rf xiaohongshu
-            mv xiaohongshu-prev xiaohongshu
-            cd xiaohongshu
-            pm2 start "npx next start -p 3002" --name xiaohongshu-web
-            pm2 start "npx tsx src/worker.ts" --name xiaohongshu-worker
-            exit 1
-          fi
-
+          pm2 start "npx next start -p 3002" --name xiaohongshu-web
+          pm2 start "npx tsx src/worker.ts" --name xiaohongshu-worker
           pm2 save
-          rm -rf xiaohongshu-prev /tmp/xhs-backup /tmp/xhs-extract /tmp/xhs.zip
 
           echo "Deploy complete!"
