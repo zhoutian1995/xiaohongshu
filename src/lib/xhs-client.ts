@@ -3,28 +3,63 @@ import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 
 let client: Client | null = null
 let transport: StdioClientTransport | null = null
+let connecting: Promise<Client> | null = null
 
+// Connection lifecycle management
 async function getClient(): Promise<Client> {
-  if (client) return client
+  // If already connected, verify connection is alive
+  if (client) {
+    try {
+      await client.ping()
+      return client
+    } catch {
+      // Connection dead, clean up and reconnect
+      await forceDisconnect()
+    }
+  }
 
-  transport = new StdioClientTransport({
-    command: 'npx',
-    args: ['-y', '@sillyl12324/xhs-mcp@latest'],
-    env: {
-      ...process.env,
-      XHS_MCP_DATA_DIR: process.env.XHS_MCP_DATA_DIR ?? `${process.env.HOME}/.xhs-mcp`,
-      XHS_MCP_HEADLESS: 'true',
-      XHS_MCP_REQUEST_INTERVAL: '2000',
-    },
-  })
+  // Prevent concurrent connection attempts
+  if (connecting) return connecting
 
-  client = new Client(
-    { name: 'xhs-benchmark-tool', version: '0.1.0' },
-    { capabilities: {} }
-  )
+  connecting = (async () => {
+    transport = new StdioClientTransport({
+      command: 'npx',
+      args: ['-y', '@sillyl12324/xhs-mcp@latest'],
+      env: {
+        PATH: process.env.PATH ?? '',
+        HOME: process.env.HOME ?? '',
+        NODE_ENV: process.env.NODE_ENV ?? 'production',
+        XHS_MCP_DATA_DIR: process.env.XHS_MCP_DATA_DIR ?? `${process.env.HOME}/.xhs-mcp`,
+        XHS_MCP_HEADLESS: 'true',
+        XHS_MCP_REQUEST_INTERVAL: '2000',
+      },
+    })
 
-  await client.connect(transport)
-  return client
+    client = new Client(
+      { name: 'xhs-benchmark-tool', version: '0.1.0' },
+      { capabilities: {} }
+    )
+
+    await client.connect(transport)
+    connecting = null
+    return client
+  })()
+
+  try {
+    return await connecting
+  } catch (err) {
+    connecting = null
+    await forceDisconnect()
+    throw err
+  }
+}
+
+async function forceDisconnect(): Promise<void> {
+  try {
+    if (client) await client.close()
+  } catch { /* ignore */ }
+  client = null
+  transport = null
 }
 
 // --- XHS MCP 工具封装 ---
@@ -68,13 +103,48 @@ export interface XhsNote {
   }
 }
 
+// Response validation
+function validateSearchResult(data: any): XhsSearchResult {
+  if (!data || typeof data !== 'object') {
+    throw new Error('Invalid search result: expected object')
+  }
+  if (!Array.isArray(data.notes)) {
+    // Try to handle alternative formats
+    if (Array.isArray(data.items)) data.notes = data.items
+    else if (Array.isArray(data.data)) data.notes = data.data
+    else throw new Error('Invalid search result: missing notes array')
+  }
+  return data as XhsSearchResult
+}
+
+function validateUserProfile(data: any): XhsUserProfile {
+  if (!data || typeof data !== 'object') {
+    throw new Error('Invalid user profile: expected object')
+  }
+  if (!data.userId && !data.user_id) {
+    throw new Error('Invalid user profile: missing userId')
+  }
+  return data as XhsUserProfile
+}
+
+function validateNote(data: any): XhsNote {
+  if (!data || typeof data !== 'object') {
+    throw new Error('Invalid note: expected object')
+  }
+  if (!data.noteId && !data.note_id) {
+    throw new Error('Invalid note: missing noteId')
+  }
+  return data as XhsNote
+}
+
 export async function xhsSearch(keyword: string, limit = 20): Promise<XhsSearchResult> {
   const c = await getClient()
   const result = await c.callTool({
     name: 'xhs_search',
     arguments: { keyword, sort: 'general', noteType: '0' },
   })
-  return parseResult(result)
+  const parsed = parseResult(result)
+  return validateSearchResult(parsed)
 }
 
 export async function xhsUserProfile(userId: string): Promise<XhsUserProfile> {
@@ -83,7 +153,8 @@ export async function xhsUserProfile(userId: string): Promise<XhsUserProfile> {
     name: 'xhs_user_profile',
     arguments: { userId },
   })
-  return parseResult(result)
+  const parsed = parseResult(result)
+  return validateUserProfile(parsed)
 }
 
 export async function xhsGetNote(noteId: string, xsecToken: string): Promise<XhsNote> {
@@ -92,7 +163,8 @@ export async function xhsGetNote(noteId: string, xsecToken: string): Promise<Xhs
     name: 'xhs_get_note',
     arguments: { noteId, xsecToken },
   })
-  return parseResult(result)
+  const parsed = parseResult(result)
+  return validateNote(parsed)
 }
 
 export async function xhsUserNotes(userId: string, cursor = '', limit = 30): Promise<{ notes: XhsNote[]; cursor: string }> {
@@ -101,7 +173,28 @@ export async function xhsUserNotes(userId: string, cursor = '', limit = 30): Pro
     name: 'xhs_user_profile',
     arguments: { userId, cursor, limit },
   })
-  return parseResult(result)
+  const parsed = parseResult(result)
+  if (!parsed || typeof parsed !== 'object') {
+    throw new Error('Invalid user notes response')
+  }
+  return parsed
+}
+
+// Login pre-check: try a lightweight operation to verify session is valid
+export async function checkLoginStatus(): Promise<boolean> {
+  try {
+    const c = await getClient()
+    // Try a minimal search to verify login state
+    const result = await c.callTool({
+      name: 'xhs_search',
+      arguments: { keyword: 'test', sort: 'general', noteType: '0' },
+    })
+    const parsed = parseResult(result)
+    // If we get any response (even empty), login is valid
+    return parsed !== null && typeof parsed === 'object'
+  } catch {
+    return false
+  }
 }
 
 // --- 辅助 ---
@@ -124,9 +217,5 @@ function parseResult(result: unknown): any {
 }
 
 export async function disconnectXhs(): Promise<void> {
-  if (client) {
-    await client.close()
-    client = null
-    transport = null
-  }
+  await forceDisconnect()
 }

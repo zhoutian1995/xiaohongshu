@@ -2,7 +2,7 @@ import type { ToolDefinition, ToolContext } from './types'
 import { FAST_MODE_LIMITS, DEEP_MODE_LIMITS } from './types'
 
 // ---- Tool implementations ----
-import { xhsSearchTool, xhsUserProfileTool, xhsGetNoteTool } from './tools/xhs'
+import { xhsSearchTool, xhsUserProfileTool, xhsGetNoteTool, xhsLoginCheckTool } from './tools/xhs'
 import { analyzeAccountTool, breakdownScriptsTool, generateContentTool } from './tools/analysis'
 import { saveArtifactTool, reportProgressTool } from './tools/system'
 
@@ -10,6 +10,7 @@ const ALL_TOOLS: ToolDefinition[] = [
   xhsSearchTool,
   xhsUserProfileTool,
   xhsGetNoteTool,
+  xhsLoginCheckTool,
   analyzeAccountTool,
   breakdownScriptsTool,
   generateContentTool,

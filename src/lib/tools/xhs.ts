@@ -1,5 +1,5 @@
 import type { ToolDefinition, ToolContext } from '../types'
-import { xhsSearch, xhsUserProfile, xhsGetNote } from '../xhs-client'
+import { xhsSearch, xhsUserProfile, xhsGetNote, checkLoginStatus } from '../xhs-client'
 import { xhsLimiter } from '../rate-limiter'
 import * as cache from '../cache'
 
@@ -19,9 +19,16 @@ export const xhsSearchTool: ToolDefinition = {
     if (cached) return cached
 
     await xhsLimiter.wait()
-    const result = await xhsSearch(input.keyword, input.limit ?? 20)
-    cache.setCache(cache.searchKey(input.keyword), result, cache.SEARCH_TTL)
-    return result
+    try {
+      const result = await xhsSearch(input.keyword, input.limit ?? 20)
+      cache.setCache(cache.searchKey(input.keyword), result, cache.SEARCH_TTL)
+      return result
+    } catch (err: any) {
+      if (err.message?.includes('Invalid search result')) {
+        return { error: '搜索结果为空或格式异常，请换关键词重试', keyword: input.keyword }
+      }
+      throw err
+    }
   },
 }
 
@@ -40,9 +47,16 @@ export const xhsUserProfileTool: ToolDefinition = {
     if (cached) return cached
 
     await xhsLimiter.wait()
-    const result = await xhsUserProfile(input.userId)
-    cache.setCache(cache.accountKey(input.userId), result)
-    return result
+    try {
+      const result = await xhsUserProfile(input.userId)
+      cache.setCache(cache.accountKey(input.userId), result)
+      return result
+    } catch (err: any) {
+      if (err.message?.includes('Invalid user profile')) {
+        return { error: '用户资料获取失败或格式异常', userId: input.userId }
+      }
+      throw err
+    }
   },
 }
 
@@ -59,6 +73,30 @@ export const xhsGetNoteTool: ToolDefinition = {
   },
   handler: async (input, ctx) => {
     await xhsLimiter.wait()
-    return await xhsGetNote(input.noteId, input.xsecToken)
+    try {
+      return await xhsGetNote(input.noteId, input.xsecToken)
+    } catch (err: any) {
+      if (err.message?.includes('Invalid note')) {
+        return { error: '笔记详情获取失败或格式异常', noteId: input.noteId }
+      }
+      throw err
+    }
+  },
+}
+
+export const xhsLoginCheckTool: ToolDefinition = {
+  name: 'xhs_login_check',
+  description: '检查小红书登录状态。在开始采集前调用，确认登录态有效。',
+  inputSchema: {
+    type: 'object',
+    properties: {},
+  },
+  handler: async (input, ctx) => {
+    try {
+      const loggedIn = await checkLoginStatus()
+      return { loggedIn, message: loggedIn ? '小红书登录态有效' : '小红书未登录或登录已过期，请先扫码登录' }
+    } catch (err: any) {
+      return { loggedIn: false, message: `登录检查失败: ${err.message}` }
+    }
   },
 }
