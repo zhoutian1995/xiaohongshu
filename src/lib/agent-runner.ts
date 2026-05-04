@@ -70,7 +70,9 @@ export async function runAgent(jobId: string): Promise<void> {
       }
 
       // Execute each tool call
-      for (const toolCall of msg.tool_calls) {
+      for (const tc of msg.tool_calls) {
+        // Cast to function tool call (we only use function tools)
+        const toolCall = tc as OpenAI.Chat.Completions.ChatCompletionMessageFunctionToolCall
         const startTime = Date.now()
         const input = JSON.parse(toolCall.function.arguments)
 
