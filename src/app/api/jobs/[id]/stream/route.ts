@@ -26,9 +26,17 @@ export async function GET(
         lastEventId = evt.id
       }
 
-      // Poll for new events
+      // Poll for new events + heartbeat every 15s (INFRA-01)
+      let lastHeartbeat = Date.now()
       const interval = setInterval(() => {
         if (done) return
+
+        // Send heartbeat to prevent proxy timeout
+        if (Date.now() - lastHeartbeat >= 15000) {
+          send('heartbeat', { ts: Date.now() })
+          lastHeartbeat = Date.now()
+        }
+
         const events = db.getTimelineEvents(id, lastEventId)
         for (const evt of events) {
           send(evt.event_type, evt)

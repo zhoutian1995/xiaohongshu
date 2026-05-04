@@ -48,7 +48,27 @@
   --radius-4xl: calc(var(--radius) * 2.6);
 }
 
-/* Warm cream palette — claude.com inspired */
+/* === Reference design palette (benchmark) === */
+:root {
+  --bench-bg: #f4efe6;
+  --bench-bg-deep: #e8dfd1;
+  --bench-paper: #fbf8f1;
+  --bench-paper-2: #f7f1e7;
+  --bench-ink: #191714;
+  --bench-muted: #6f675c;
+  --bench-line: #d8cbbb;
+  --bench-line-strong: #b9aa99;
+  --bench-accent: #c15f3c;
+  --bench-accent-dark: #8f3f25;
+  --bench-terminal: #181512;
+  --bench-terminal-soft: #241f1a;
+  --bench-green: #78d48b;
+  --bench-shadow: 0 22px 70px rgba(45, 35, 24, 0.12);
+  --bench-radius-xl: 28px;
+  --bench-radius-lg: 18px;
+}
+
+/* === shadcn/ui warm cream palette === */
 :root {
   --background: oklch(0.965 0.006 95);
   --foreground: oklch(0.15 0.012 60);
