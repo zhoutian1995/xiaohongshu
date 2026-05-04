@@ -32,7 +32,9 @@ export function spawnSandbox(
         JOB_MODE: mode,
         DATABASE_PATH: process.env.DATABASE_PATH ?? './data/xhs.db',
         XHS_MCP_DATA_DIR: process.env.XHS_MCP_DATA_DIR,
-        ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
+        ZHIPU_API_KEY: process.env.ZHIPU_API_KEY,
+        ZHIPU_BASE_URL: process.env.ZHIPU_BASE_URL,
+        LLM_MODEL: process.env.LLM_MODEL,
       },
       stdio: ['pipe', 'pipe', 'pipe'],
     })

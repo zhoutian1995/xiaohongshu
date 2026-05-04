@@ -1,4 +1,4 @@
-import type { ToolDefinition, ToolContext, BudgetLimits } from './types'
+import type { ToolDefinition, ToolContext } from './types'
 import { FAST_MODE_LIMITS, DEEP_MODE_LIMITS } from './types'
 
 // ---- Tool implementations ----
@@ -19,11 +19,15 @@ const ALL_TOOLS: ToolDefinition[] = [
 
 const toolMap = new Map(ALL_TOOLS.map(t => [t.name, t]))
 
-export function getToolDefinitions(): Anthropic.Tool[] {
+/** OpenAI/Zhipu-compatible function calling format */
+export function getToolDefinitions(): any[] {
   return ALL_TOOLS.map(t => ({
-    name: t.name,
-    description: t.description,
-    input_schema: t.inputSchema as any,
+    type: 'function' as const,
+    function: {
+      name: t.name,
+      description: t.description,
+      parameters: t.inputSchema,
+    },
   }))
 }
 
@@ -32,6 +36,3 @@ export async function executeTool(name: string, input: any, context: ToolContext
   if (!tool) throw new Error(`Unknown tool: ${name}`)
   return tool.handler(input, context)
 }
-
-// Anthropic type import
-import Anthropic from '@anthropic-ai/sdk'
