@@ -20,7 +20,7 @@ export async function GET(
       }
 
       // Send initial events
-      const initialEvents = db.getJobEvents(id, afterId)
+      const initialEvents = db.getTimelineEvents(id, afterId)
       for (const evt of initialEvents) {
         send(evt.event_type, evt)
         lastEventId = evt.id
@@ -29,13 +29,11 @@ export async function GET(
       // Poll for new events
       const interval = setInterval(() => {
         if (done) return
-        const events = db.getJobEvents(id, lastEventId)
+        const events = db.getTimelineEvents(id, lastEventId)
         for (const evt of events) {
           send(evt.event_type, evt)
           lastEventId = evt.id
-
-          // Stop on terminal events
-          if (evt.event_type === 'job:completed' || evt.event_type === 'job:error') {
+          if (evt.event_type === 'job_completed' || evt.event_type === 'job_error') {
             done = true
             clearInterval(interval)
             controller.close()
@@ -45,27 +43,17 @@ export async function GET(
 
       // Timeout after 15 minutes
       setTimeout(() => {
-        if (!done) {
-          done = true
-          clearInterval(interval)
-          controller.close()
-        }
+        if (!done) { done = true; clearInterval(interval); controller.close() }
       }, 15 * 60 * 1000)
 
-      // Clean up on abort
       req.signal.addEventListener('abort', () => {
-        done = true
-        clearInterval(interval)
+        done = true; clearInterval(interval)
         try { controller.close() } catch {}
       })
     },
   })
 
   return new Response(stream, {
-    headers: {
-      'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache',
-      'Connection': 'keep-alive',
-    },
+    headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive' },
   })
 }

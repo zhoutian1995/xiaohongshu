@@ -1,291 +1,184 @@
 // ============================================================
-// AI 对标账号分析与内容生成工具 — 核心类型定义
+// AI 对标账号分析与内容生成工具 v3.0 — Agent 架构类型定义
 // ============================================================
 
 // --- 门店问卷 ---
 
 export interface StoreProfile {
-  // 基础信息
   industry: string
   city: string
   district?: string
   storeName: string
-
-  // 定价与客群
   priceRange: string
   targetAudience: string
   businessArea: string
-
-  // 能力与素材
   specialties: string[]
   realAdvantages: string[]
   filmableAssets: string[]
   onCamera: boolean
   onCameraInfo?: string
-
-  // 运营情况
   postFrequency: string
   existingAccount?: string
   forbiddenTopics?: string[]
-
-  // 转化方式
   conversionMethod: string
 }
 
-// --- 任务状态 ---
+// --- 任务 ---
 
-export type JobStatus = 'queued' | 'running' | 'paused' | 'completed' | 'error'
+export type JobRunStatus =
+  | 'queued'
+  | 'spawning'
+  | 'running'
+  | 'validating'
+  | 'repairing'
+  | 'completed'
+  | 'error'
+
 export type JobMode = 'fast' | 'deep'
 
-export interface Project {
+export interface Job {
   id: string
   storeProfile: StoreProfile
   mode: JobMode
-  status: JobStatus
-  currentPhase: number
-  createdAt: string
+  runStatus: JobRunStatus
+  sandboxPid?: number
+  startedAt?: string
   completedAt?: string
   errorMessage?: string
+  budget: Budget
 }
 
-// --- 账号分类 ---
-
-export type AccountType = 'merchant' | 'influencer' | 'deal' | 'user' | 'brand'
-
-export interface ClassifiedAccount {
-  userId: string
-  nickname: string
-  avatar: string
-  followers: number
-  notesCount: number
-  accountType: AccountType | 'uncertain'
-  classificationMethod: 'rule' | 'ai'
-  classificationEvidence: string
+export interface Budget {
+  searchesUsed: number
+  profilesUsed: number
+  notesUsed: number
+  claudeTokensUsed: number
+  toolCallsTotal: number
+  elapsedMs: number
 }
 
-// --- 评分 ---
+// --- 产物 ---
 
-export interface BenchmarkScore {
-  localRelevance: number
-  industryRelevance: number
-  consultCommentRate: number
-  activityScore: number
-  recentHitRate: number
-  hasOrganicHits: boolean
-  learnability: number
-  overallScore: number
-}
+export type ArtifactType =
+  | 'benchmark_accounts'
+  | 'account_analysis'
+  | 'script_breakdown'
+  | 'content_strategy'
 
-// --- 笔记 ---
-
-export type NoteType = 'image' | 'video'
-export type PerformanceTier = 'hit' | 'average' | 'low'
-export type DataFreshness = 'fresh' | 'stale'
-
-export interface Note {
-  noteId: string
-  noteUrl: string
-  title: string
-  content: string
-  type: NoteType
-  mediaCount: number
-  likes: number
-  comments: number
-  favorites: number
-  shares: number
-  tags: string[]
-  isCollection: boolean
-  isDeal: boolean
-  publishedAt: string
-  collectedAt: string
-  dataFreshness: DataFreshness
-  performanceTier: PerformanceTier
-  scriptBreakdown?: ScriptBreakdown
-  commentSamples?: CommentSample[]
-}
-
-export interface CommentSample {
-  content: string
-  likes: number
-  type: 'consult' | 'praise' | 'question' | 'other'
-}
-
-// --- 对标账号（完整） ---
-
-export interface BenchmarkAccount {
-  userId: string
-  nickname: string
-  avatar: string
-  followers: number
-  notesCount: number
-  accountType: AccountType
-  classificationEvidence: string
-  notesLast30d: number
-  notesLast90d: number
-  avgLikes: number
-  avgComments: number
-  avgFavorites: number
-  avgShares: number
-  collectToLikeRatio: number
-  consultCommentRate: number
-  score: BenchmarkScore
-  notes: Note[]
-  positioning?: string
-  contentTypes?: ContentTypeDistribution[]
-  analysis?: AccountAnalysis
-}
-
-export interface ContentTypeDistribution {
-  type: string
-  percentage: number
-  avgEngagement: number
-  evidence: EvidenceReference[]
-}
-
-// --- 脚本拆解 ---
-
-export interface ScriptBreakdown {
-  titleFormula: string
-  coverStyle: string
-  structure: string[]
-  hookTechnique: string
-  ctaTechnique: string
-  evidence: EvidenceReference[]
-}
-
-// --- 证据引用 ---
-
-export interface EvidenceReference {
-  noteId: string
-  title: string
-  url: string
-  relevantData?: string
-}
-
-// --- 账号分析 ---
-
-export interface AccountAnalysis {
-  positioning: string
-  targetAudience: string
-  differentiation: string
-  contentTypes: ContentTypeDistribution[]
-  postingFrequency: string
-  postingTimePattern: string
-  hitPatterns: string[]
-  evidenceList: AnalysisConclusion[]
-}
-
-export interface AnalysisConclusion {
-  conclusion: string
-  evidence: EvidenceReference[]
-  metric: string
-}
-
-// --- 脚本拆解对比 ---
-
-export interface BreakdownResult {
-  hitPatterns: ScriptPattern[]
-  averagePatterns: ScriptPattern[]
-  differenceFactors: DifferenceFactor[]
-  reusableTemplates: ScriptTemplate[]
-}
-
-export interface ScriptPattern {
-  titleFormula: string
-  coverStyle: string
-  hookTechnique: string
-  ctaTechnique: string
-  evidence: EvidenceReference[]
-}
-
-export interface DifferenceFactor {
-  dimension: string
-  hitBehavior: string
-  averageBehavior: string
-  impact: string
-}
-
-export interface ScriptTemplate {
-  name: string
-  structure: string[]
-  applicableScenarios: string
-  referenceNotes: EvidenceReference[]
-}
-
-// --- 内容策略 ---
-
-export interface ContentStrategy {
-  positioning: string
-  positioningEvidence: EvidenceReference[]
-  weekPlan: DayPlan[]
-  topicPool: Topic[]
-  scripts: ShootableScript[]
-  tagLibrary: TagCategory[]
-}
-
-export interface DayPlan {
-  day: number
-  task: string
-  shootingNotes: string
-  onCamera: string
-}
-
-export interface Topic {
-  title: string
-  sourceAccount: string
-  sourceNoteId: string
-  engagement: number
-}
-
-export interface ShootableScript {
-  title: string
-  coverDescription: string
-  copy: string
-  shootingChecklist: string[]
-  tags: string[]
-  referenceNotes: EvidenceReference[]
-}
-
-export interface TagCategory {
-  category: string
-  tags: string[]
-}
-
-// --- 任务事件（SSE） ---
-
-export type JobEventType =
-  | 'job:started'
-  | 'phase:started'
-  | 'phase:progress'
-  | 'phase:completed'
-  | 'job:completed'
-  | 'job:error'
-
-export interface JobEvent {
-  type: JobEventType
+export interface Artifact {
+  id: string
   jobId: string
-  phase?: number
+  type: ArtifactType
+  data: string  // JSON string
+  createdAt: string
+  validationResult?: 'pass' | 'fail'
+  validationErrors?: string[]
+  repairAttempt?: number // 0=首次, 1=修复后
+}
+
+// --- 工具调用 ---
+
+export interface ToolCall {
+  id: string
+  jobId: string
+  toolName: string
+  input: string   // JSON
+  output: string   // JSON
+  status: 'success' | 'error' | 'budget_exceeded'
+  errorMessage?: string
+  durationMs: number
+  budgetAfterCall: {
+    searchesUsed: number
+    profilesUsed: number
+    notesUsed: number
+    claudeTokensUsed: number
+  }
+  createdAt: string
+}
+
+// --- 时间线事件 ---
+
+export type TimelineEventType =
+  | 'job_started'
+  | 'tool_called'
+  | 'tool_completed'
+  | 'artifact_saved'
+  | 'validation_passed'
+  | 'validation_failed'
+  | 'repair_started'
+  | 'job_completed'
+  | 'job_error'
+
+export interface TimelineEvent {
+  id: string
+  jobId: string
+  type: TimelineEventType
   message: string
-  data?: unknown
-  timestamp: string
+  data?: string // JSON
+  createdAt: string
 }
 
-// --- 评分权重 ---
+// --- 工具定义 ---
 
-export const FAST_MODE_WEIGHTS = {
-  localRelevance: 0.25,
-  industryRelevance: 0.20,
-  consultCommentRate: 0.10, // 代理指标：收藏/评论比
-  activityScore: 0.25,
-  recentHitRate: 0.10,
-  learnability: 0.10,
+export interface ToolDefinition {
+  name: string
+  description: string
+  inputSchema: Record<string, unknown> // JSON Schema
+  handler: (input: any, context: ToolContext) => Promise<any>
 }
 
-export const DEEP_MODE_WEIGHTS = {
-  localRelevance: 0.25,
-  industryRelevance: 0.20,
-  consultCommentRate: 0.20,
-  activityScore: 0.15,
-  recentHitRate: 0.10,
-  learnability: 0.10,
+export interface ToolContext {
+  jobId: string
+  mode: JobMode
+  storeProfile: StoreProfile
+  budget: Budget
+  budgetLimits: BudgetLimits
+}
+
+// --- 预算限制 ---
+
+export interface BudgetLimits {
+  maxSearches: number
+  maxProfiles: number
+  maxNotes: number
+  maxAnalysisCalls: number
+  maxClaudeTokens: number
+  maxToolCalls: number
+  maxElapsedMs: number
+  maxCandidateAccounts: number
+  maxBenchmarkAccounts: number
+  maxScripts: number
+}
+
+export const FAST_MODE_LIMITS: BudgetLimits = {
+  maxSearches: 6,
+  maxProfiles: 15,
+  maxNotes: 30,
+  maxAnalysisCalls: 10,
+  maxClaudeTokens: 80000,
+  maxToolCalls: 50,
+  maxElapsedMs: 8 * 60 * 1000,
+  maxCandidateAccounts: 12,
+  maxBenchmarkAccounts: 3,
+  maxScripts: 2,
+}
+
+export const DEEP_MODE_LIMITS: BudgetLimits = {
+  maxSearches: 12,
+  maxProfiles: 50,
+  maxNotes: 100,
+  maxAnalysisCalls: 15,
+  maxClaudeTokens: 200000,
+  maxToolCalls: 100,
+  maxElapsedMs: 15 * 60 * 1000,
+  maxCandidateAccounts: 50,
+  maxBenchmarkAccounts: 5,
+  maxScripts: 3,
+}
+
+// --- 校验结果 ---
+
+export interface ValidationResult {
+  passed: boolean
+  errors: string[]
 }

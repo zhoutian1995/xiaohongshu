@@ -6,22 +6,17 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params
-  const project = db.getProject(id)
-
-  if (!project) {
-    return NextResponse.json({ error: 'Project not found' }, { status: 404 })
+  const job = db.getJob(id)
+  if (!job) {
+    return NextResponse.json({ error: 'Job not found' }, { status: 404 })
   }
 
-  const accounts = db.getBenchmarkAccounts(id)
-
+  const artifacts = db.getArtifacts(id)
   return NextResponse.json({
-    ...project,
-    store_profile: JSON.parse(project.store_profile),
-    accounts: accounts.map((a: any) => ({
+    ...job,
+    artifacts: artifacts.map((a: any) => ({
       ...a,
-      score_json: a.score_json ? JSON.parse(a.score_json) : null,
-      notes_json: a.notes_json ? JSON.parse(a.notes_json) : null,
-      analysis_json: a.analysis_json ? JSON.parse(a.analysis_json) : null,
+      data_json: JSON.parse(a.data_json),
     })),
   })
 }

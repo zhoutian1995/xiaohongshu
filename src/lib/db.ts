@@ -24,76 +24,57 @@ export function getDb(): Database.Database {
 
 function migrate(db: Database.Database) {
   db.exec(`
-    CREATE TABLE IF NOT EXISTS projects (
+    CREATE TABLE IF NOT EXISTS jobs (
       id TEXT PRIMARY KEY,
       store_profile TEXT NOT NULL,
       mode TEXT NOT NULL DEFAULT 'fast',
-      status TEXT NOT NULL DEFAULT 'queued',
-      current_phase INTEGER NOT NULL DEFAULT 0,
-      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      run_status TEXT NOT NULL DEFAULT 'queued',
+      sandbox_pid INTEGER,
+      budget_json TEXT NOT NULL DEFAULT '{}',
+      started_at TEXT,
       completed_at TEXT,
-      error_message TEXT
+      error_message TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
-    CREATE TABLE IF NOT EXISTS benchmark_accounts (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      project_id TEXT NOT NULL REFERENCES projects(id),
-      user_id TEXT NOT NULL,
-      nickname TEXT NOT NULL,
-      avatar TEXT,
-      followers INTEGER DEFAULT 0,
-      notes_count INTEGER DEFAULT 0,
-      account_type TEXT NOT NULL,
-      classification_method TEXT NOT NULL,
-      classification_evidence TEXT,
-      notes_last_30d INTEGER DEFAULT 0,
-      notes_last_90d INTEGER DEFAULT 0,
-      avg_likes REAL DEFAULT 0,
-      avg_comments REAL DEFAULT 0,
-      avg_favorites REAL DEFAULT 0,
-      avg_shares REAL DEFAULT 0,
-      collect_to_like_ratio REAL DEFAULT 0,
-      consult_comment_rate REAL DEFAULT 0,
-      score_json TEXT,
-      notes_json TEXT,
-      analysis_json TEXT,
-      UNIQUE(project_id, user_id)
+    CREATE TABLE IF NOT EXISTS artifacts (
+      id TEXT PRIMARY KEY,
+      job_id TEXT NOT NULL REFERENCES jobs(id),
+      type TEXT NOT NULL,
+      data_json TEXT NOT NULL,
+      validation_result TEXT,
+      validation_errors_json TEXT,
+      repair_attempt INTEGER DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
-    CREATE TABLE IF NOT EXISTS notes (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      project_id TEXT NOT NULL REFERENCES projects(id),
-      account_id INTEGER REFERENCES benchmark_accounts(id),
-      note_id TEXT NOT NULL,
-      note_url TEXT,
-      title TEXT,
-      content TEXT,
-      type TEXT DEFAULT 'image',
-      likes INTEGER DEFAULT 0,
-      comments INTEGER DEFAULT 0,
-      favorites INTEGER DEFAULT 0,
-      shares INTEGER DEFAULT 0,
-      tags_json TEXT,
-      published_at TEXT,
-      collected_at TEXT NOT NULL DEFAULT (datetime('now')),
-      performance_tier TEXT,
-      breakdown_json TEXT,
-      UNIQUE(project_id, note_id)
+    CREATE INDEX IF NOT EXISTS idx_artifacts_job ON artifacts(job_id);
+
+    CREATE TABLE IF NOT EXISTS tool_calls (
+      id TEXT PRIMARY KEY,
+      job_id TEXT NOT NULL REFERENCES jobs(id),
+      tool_name TEXT NOT NULL,
+      input_json TEXT,
+      output_json TEXT,
+      status TEXT NOT NULL DEFAULT 'success',
+      error_message TEXT,
+      duration_ms INTEGER DEFAULT 0,
+      budget_after_json TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
-    CREATE TABLE IF NOT EXISTS job_events (
+    CREATE INDEX IF NOT EXISTS idx_tool_calls_job ON tool_calls(job_id);
+
+    CREATE TABLE IF NOT EXISTS timeline_events (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      project_id TEXT NOT NULL REFERENCES projects(id),
+      job_id TEXT NOT NULL REFERENCES jobs(id),
       event_type TEXT NOT NULL,
-      phase INTEGER,
       message TEXT,
       data_json TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
-    CREATE INDEX IF NOT EXISTS idx_job_events_project ON job_events(project_id);
-    CREATE INDEX IF NOT EXISTS idx_notes_project ON notes(project_id);
-    CREATE INDEX IF NOT EXISTS idx_accounts_project ON benchmark_accounts(project_id);
+    CREATE INDEX IF NOT EXISTS idx_timeline_job ON timeline_events(job_id);
 
     CREATE TABLE IF NOT EXISTS cache (
       key TEXT PRIMARY KEY,
@@ -105,76 +86,87 @@ function migrate(db: Database.Database) {
   `)
 }
 
-// --- Project CRUD ---
+// --- Job CRUD ---
 
-export function createProject(id: string, storeProfile: string, mode: string): void {
+export function createJob(id: string, storeProfile: string, mode: string): void {
   getDb().prepare(
-    'INSERT INTO projects (id, store_profile, mode, status) VALUES (?, ?, ?, ?)'
-  ).run(id, storeProfile, mode, 'queued')
+    'INSERT INTO jobs (id, store_profile, mode, run_status, budget_json) VALUES (?, ?, ?, ?, ?)'
+  ).run(id, storeProfile, mode, 'queued', JSON.stringify({
+    searchesUsed: 0, profilesUsed: 0, notesUsed: 0,
+    claudeTokensUsed: 0, toolCallsTotal: 0, elapsedMs: 0,
+  }))
 }
 
-export function getProject(id: string): any | undefined {
-  return getDb().prepare('SELECT * FROM projects WHERE id = ?').get(id)
+export function getJob(id: string): any | undefined {
+  const row = getDb().prepare('SELECT * FROM jobs WHERE id = ?').get(id)
+  if (row) {
+    (row as any).store_profile = JSON.parse((row as any).store_profile)
+    ;(row as any).budget_json = JSON.parse((row as any).budget_json || '{}')
+  }
+  return row
 }
 
-export function updateProjectStatus(id: string, status: string, extra?: { currentPhase?: number; errorMessage?: string; completedAt?: string }): void {
-  const sets = ['status = ?']
-  const values: any[] = [status]
+export function updateJobStatus(id: string, runStatus: string, extra?: Record<string, any>): void {
+  const sets = ['run_status = ?']
+  const values: any[] = [runStatus]
 
-  if (extra?.currentPhase !== undefined) { sets.push('current_phase = ?'); values.push(extra.currentPhase) }
-  if (extra?.errorMessage !== undefined) { sets.push('error_message = ?'); values.push(extra.errorMessage) }
-  if (extra?.completedAt !== undefined) { sets.push('completed_at = ?'); values.push(extra.completedAt) }
+  if (extra) {
+    for (const [k, v] of Object.entries(extra)) {
+      if (k === 'budget') {
+        sets.push('budget_json = ?')
+        values.push(JSON.stringify(v))
+      } else {
+        sets.push(`${k} = ?`)
+        values.push(v)
+      }
+    }
+  }
 
   values.push(id)
-  getDb().prepare(`UPDATE projects SET ${sets.join(', ')} WHERE id = ?`).run(...values)
+  getDb().prepare(`UPDATE jobs SET ${sets.join(', ')} WHERE id = ?`).run(...values)
 }
 
-export function getNextQueuedProject(): any | undefined {
-  return getDb().prepare("SELECT * FROM projects WHERE status = 'queued' ORDER BY created_at ASC LIMIT 1").get()
+export function getNextQueuedJob(): any | undefined {
+  return getDb().prepare("SELECT * FROM jobs WHERE run_status = 'queued' ORDER BY created_at ASC LIMIT 1").get()
 }
 
-// --- Job Events ---
+// --- Artifacts ---
 
-export function insertJobEvent(projectId: string, eventType: string, phase: number | null, message: string, data?: any): void {
+export function saveArtifact(id: string, jobId: string, type: string, data: string, repairAttempt = 0): void {
   getDb().prepare(
-    'INSERT INTO job_events (project_id, event_type, phase, message, data_json) VALUES (?, ?, ?, ?, ?)'
-  ).run(projectId, eventType, phase, message, data ? JSON.stringify(data) : null)
+    'INSERT OR REPLACE INTO artifacts (id, job_id, type, data_json, repair_attempt) VALUES (?, ?, ?, ?, ?)'
+  ).run(id, jobId, type, data, repairAttempt)
 }
 
-export function getJobEvents(projectId: string, afterId = 0): any[] {
-  return getDb().prepare('SELECT * FROM job_events WHERE project_id = ? AND id > ? ORDER BY id ASC').all(projectId, afterId)
+export function getArtifacts(jobId: string): any[] {
+  return getDb().prepare('SELECT * FROM artifacts WHERE job_id = ? ORDER BY created_at ASC').all(jobId)
 }
 
-// --- Benchmark Accounts ---
-
-export function upsertBenchmarkAccount(projectId: string, account: any): void {
-  getDb().prepare(`
-    INSERT INTO benchmark_accounts (project_id, user_id, nickname, avatar, followers, notes_count, account_type, classification_method, classification_evidence, notes_last_30d, notes_last_90d, avg_likes, avg_comments, avg_favorites, avg_shares, collect_to_like_ratio, consult_comment_rate, score_json, notes_json, analysis_json)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(project_id, user_id) DO UPDATE SET
-      nickname=excluded.nickname, avatar=excluded.avatar, followers=excluded.followers,
-      notes_count=excluded.notes_count, account_type=excluded.account_type,
-      classification_method=excluded.classification_method, classification_evidence=excluded.classification_evidence,
-      notes_last_30d=excluded.notes_last_30d, notes_last_90d=excluded.notes_last_90d,
-      avg_likes=excluded.avg_likes, avg_comments=excluded.avg_comments,
-      avg_favorites=excluded.avg_favorites, avg_shares=excluded.avg_shares,
-      collect_to_like_ratio=excluded.collect_to_like_ratio, consult_comment_rate=excluded.consult_comment_rate,
-      score_json=excluded.score_json, notes_json=excluded.notes_json, analysis_json=excluded.analysis_json
-  `).run(
-    projectId, account.userId, account.nickname, account.avatar ?? null,
-    account.followers, account.notesCount, account.accountType,
-    account.classificationMethod, account.classificationEvidence ?? null,
-    account.notesLast30d ?? 0, account.notesLast90d ?? 0,
-    account.avgLikes ?? 0, account.avgComments ?? 0, account.avgFavorites ?? 0, account.avgShares ?? 0,
-    account.collectToLikeRatio ?? 0, account.consultCommentRate ?? 0,
-    account.score ? JSON.stringify(account.score) : null,
-    account.notes ? JSON.stringify(account.notes) : null,
-    account.analysis ? JSON.stringify(account.analysis) : null
-  )
+export function updateArtifactValidation(id: string, result: string, errors?: string[]): void {
+  getDb().prepare(
+    'UPDATE artifacts SET validation_result = ?, validation_errors_json = ? WHERE id = ?'
+  ).run(result, errors ? JSON.stringify(errors) : null, id)
 }
 
-export function getBenchmarkAccounts(projectId: string): any[] {
-  return getDb().prepare('SELECT * FROM benchmark_accounts WHERE project_id = ? ORDER BY id ASC').all(projectId)
+// --- Tool Calls ---
+
+export function insertToolCall(tc: { id: string; jobId: string; toolName: string; input: string; output: string; status: string; errorMessage?: string; durationMs: number; budgetAfter: any }): void {
+  getDb().prepare(
+    'INSERT INTO tool_calls (id, job_id, tool_name, input_json, output_json, status, error_message, duration_ms, budget_after_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+  ).run(tc.id, tc.jobId, tc.toolName, tc.input, tc.output, tc.status, tc.errorMessage ?? null, tc.durationMs, JSON.stringify(tc.budgetAfter))
+}
+
+// --- Timeline Events ---
+
+export function insertTimelineEvent(jobId: string, eventType: string, message: string, data?: any): number {
+  const result = getDb().prepare(
+    'INSERT INTO timeline_events (job_id, event_type, message, data_json) VALUES (?, ?, ?, ?)'
+  ).run(jobId, eventType, message, data ? JSON.stringify(data) : null)
+  return Number(result.lastInsertRowid)
+}
+
+export function getTimelineEvents(jobId: string, afterId = 0): any[] {
+  return getDb().prepare('SELECT * FROM timeline_events WHERE job_id = ? AND id > ? ORDER BY id ASC').all(jobId, afterId)
 }
 
 // --- Cache ---
