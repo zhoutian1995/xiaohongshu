@@ -109,8 +109,8 @@ jobs:
 
           # Install + build
           cd xiaohongshu-next
-          npm install --omit=dev 2>&1 | tail -3
-          npx next build --webpack 2>&1 | tail -5
+          npm install --omit=dev 2>&1 | tail -5
+          npx next build --webpack 2>&1
           cd ..
 
           # Swap directories
