@@ -74,7 +74,19 @@ export async function runAgent(jobId: string): Promise<void> {
         // Cast to function tool call (we only use function tools)
         const toolCall = tc as OpenAI.Chat.Completions.ChatCompletionMessageFunctionToolCall
         const startTime = Date.now()
-        const input = JSON.parse(toolCall.function.arguments)
+        let input: any
+        try {
+          input = JSON.parse(toolCall.function.arguments)
+        } catch (parseErr: any) {
+          const errorMsg = `JSON parse error for tool ${toolCall.function.name}: ${parseErr.message}`
+          db.insertTimelineEvent(jobId, 'job_error', errorMsg)
+          messages.push({
+            role: 'tool',
+            tool_call_id: toolCall.id,
+            content: JSON.stringify({ error: errorMsg, raw: toolCall.function.arguments }),
+          })
+          continue
+        }
 
         db.insertTimelineEvent(jobId, 'tool_called', `调用 ${toolCall.function.name}`, input)
 

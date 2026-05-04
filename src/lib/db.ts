@@ -106,6 +106,8 @@ export function getJob(id: string): any | undefined {
   return row
 }
 
+const ALLOWED_COLUMNS = new Set(['started_at', 'completed_at', 'error_message', 'sandbox_pid'])
+
 export function updateJobStatus(id: string, runStatus: string, extra?: Record<string, any>): void {
   const sets = ['run_status = ?']
   const values: any[] = [runStatus]
@@ -115,9 +117,11 @@ export function updateJobStatus(id: string, runStatus: string, extra?: Record<st
       if (k === 'budget') {
         sets.push('budget_json = ?')
         values.push(JSON.stringify(v))
-      } else {
+      } else if (ALLOWED_COLUMNS.has(k)) {
         sets.push(`${k} = ?`)
         values.push(v)
+      } else {
+        throw new Error(`Invalid column in updateJobStatus: ${k}`)
       }
     }
   }

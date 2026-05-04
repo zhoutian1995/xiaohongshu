@@ -23,19 +23,29 @@ export function spawnSandbox(
   return new Promise((resolve) => {
     const startTime = Date.now()
 
-    // Spawn agent-runner as child process
-    const child: ChildProcess = spawn('npx', ['tsx', 'src/lib/agent-runner.ts'], {
+    // Environment variable whitelist (no ...process.env spread)
+    const SANDBOX_ENV_KEYS = [
+      'PATH', 'HOME', 'NODE_ENV', 'DATABASE_PATH',
+      'XHS_MCP_DATA_DIR', 'ZHIPU_API_KEY', 'ZHIPU_BASE_URL',
+      'LLM_MODEL', 'JOB_ID', 'JOB_MODE',
+    ] as const
+
+    const env: Record<string, string | undefined> = {}
+    for (const key of SANDBOX_ENV_KEYS) {
+      const value = process.env[key]
+      if (value !== undefined) {
+        env[key] = value
+      }
+    }
+    // Explicit overrides for this job
+    env.JOB_ID = jobId
+    env.JOB_MODE = mode
+    env.DATABASE_PATH = process.env.DATABASE_PATH ?? './data/xhs.db'
+
+    // Spawn agent CLI entry point
+    const child: ChildProcess = spawn('npx', ['tsx', 'src/bin/agent.ts', '--job-id', jobId], {
       cwd: process.cwd(),
-      env: {
-        ...process.env,
-        JOB_ID: jobId,
-        JOB_MODE: mode,
-        DATABASE_PATH: process.env.DATABASE_PATH ?? './data/xhs.db',
-        XHS_MCP_DATA_DIR: process.env.XHS_MCP_DATA_DIR,
-        ZHIPU_API_KEY: process.env.ZHIPU_API_KEY,
-        ZHIPU_BASE_URL: process.env.ZHIPU_BASE_URL,
-        LLM_MODEL: process.env.LLM_MODEL,
-      },
+      env: env as any,
       stdio: ['pipe', 'pipe', 'pipe'],
     })
 
