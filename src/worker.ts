@@ -1,4 +1,5 @@
-import { getNextQueuedJob, updateJobStatus, insertTimelineEvent, getJob, getArtifacts } from './lib/db'
+import * as db from './lib/db'
+const { getNextQueuedJob, updateJobStatus, insertTimelineEvent, getJob, getArtifacts } = db
 import { spawnSandbox } from './lib/sandbox-executor'
 import { validateJobArtifacts } from './lib/artifact-validator'
 import { FAST_MODE_LIMITS, DEEP_MODE_LIMITS } from './lib/types'
@@ -68,9 +69,30 @@ async function processJob(jobId: string) {
   if (!validation.passed) {
     insertTimelineEvent(jobId, 'validation_failed', `校验失败: ${validation.errors.join('; ')}`)
 
-    // Repair: send errors back to agent (reuse cache, don't re-spawn full task)
+    // Save validation errors as repair context artifact (PIPE-04)
+    const repairContext = {
+      type: 'repair_context',
+      validationErrors: validation.errors,
+      existingArtifacts: db.getArtifacts(jobId).map((a: any) => ({
+        type: a.type,
+        summary: `exists (${JSON.parse(a.data_json) ? 'has data' : 'empty'})`,
+      })),
+    }
+    db.insertToolCall({
+      id: `repair-${jobId}`,
+      jobId,
+      toolName: 'repair_context',
+      input: JSON.stringify({ validationErrors: validation.errors }),
+      output: JSON.stringify(repairContext),
+      status: 'success',
+      errorMessage: undefined,
+      durationMs: 0,
+      budgetAfter: { ...getJob(jobId)?.budget_json },
+    })
+
+    // Repair: send errors back to agent (PIPE-04: error context flows into repair)
     updateJobStatus(jobId, 'repairing')
-    insertTimelineEvent(jobId, 'repair_started', '启动修复')
+    insertTimelineEvent(jobId, 'repair_started', '启动修复（含错误上下文）')
 
     const repairResult = await spawnSandbox(jobId, job.mode, Math.min(limits.maxElapsedMs, 3 * 60 * 1000))
 

@@ -45,13 +45,27 @@ export async function runAgent(jobId: string): Promise<void> {
         break
       }
 
-      // Call LLM
-      const response = await client.chat.completions.create({
-        model: LLM_MODEL,
-        messages,
-        tools,
-        max_tokens: 4096,
-      })
+      // Call LLM with retry (PIPE-03: exponential backoff, max 3 retries)
+      let response: OpenAI.ChatCompletion
+      let retries = 0
+      const maxRetries = 3
+      while (true) {
+        try {
+          response = await client.chat.completions.create({
+            model: LLM_MODEL,
+            messages,
+            tools,
+            max_tokens: 4096,
+          })
+          break
+        } catch (llmErr: any) {
+          retries++
+          if (retries >= maxRetries) throw llmErr
+          const delayMs = Math.min(1000 * Math.pow(2, retries - 1), 10000)
+          db.insertTimelineEvent(jobId, 'job_error', `LLM 调用失败 (重试 ${retries}/${maxRetries}): ${llmErr.message}`)
+          await new Promise(resolve => setTimeout(resolve, delayMs))
+        }
+      }
 
       const choice = response.choices[0]
       const msg = choice.message
@@ -89,6 +103,32 @@ export async function runAgent(jobId: string): Promise<void> {
         }
 
         db.insertTimelineEvent(jobId, 'tool_called', `调用 ${toolCall.function.name}`, input)
+
+        // Per-resource budget check (PIPE-01)
+        if (toolCall.function.name === 'xhs_search' && budget.searchesUsed >= limits.maxSearches) {
+          messages.push({
+            role: 'tool',
+            tool_call_id: toolCall.id,
+            content: JSON.stringify({ error: `搜索次数已达上限 (${limits.maxSearches})` }),
+          })
+          continue
+        }
+        if (toolCall.function.name === 'xhs_user_profile' && budget.profilesUsed >= limits.maxProfiles) {
+          messages.push({
+            role: 'tool',
+            tool_call_id: toolCall.id,
+            content: JSON.stringify({ error: `用户资料查询已达上限 (${limits.maxProfiles})` }),
+          })
+          continue
+        }
+        if (toolCall.function.name === 'xhs_get_note' && budget.notesUsed >= limits.maxNotes) {
+          messages.push({
+            role: 'tool',
+            tool_call_id: toolCall.id,
+            content: JSON.stringify({ error: `笔记详情查询已达上限 (${limits.maxNotes})` }),
+          })
+          continue
+        }
 
         let output: any
         let status: 'success' | 'error' | 'budget_exceeded' = 'success'
