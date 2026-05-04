@@ -30,7 +30,11 @@ Decimal phases appear between their surrounding integers in numeric order.
   3. POST /api/jobs 收到非法请求体（缺少必填字段、mode 枚举值错误）时返回 400 + 明确错误信息，合法请求正常创建任务
   4. 沙盒子进程的环境变量只包含白名单条目（PATH, HOME, DATABASE_PATH, ZHIPU_API_KEY 等），不包含完整 process.env
   5. `data/` 目录和 `*.db*` 文件已被 .gitignore 排除，不会被提交到仓库
-**Plans**: TBD
+**Plans**: 2 plans
+
+Plans:
+- [ ] 01-01-PLAN.md -- CLI 入口点 + 安全加固（JSON.parse、SQL 白名单、环境变量白名单、gitignore）
+- [ ] 01-02-PLAN.md -- POST /api/jobs Zod schema 验证
 
 ### Phase 2: Data Collection
 **Goal**: Agent 能通过 xhs-mcp 搜索小红书笔记、获取用户资料、获取笔记详情，数据经过验证后进入分析流程
@@ -87,7 +91,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Agent Core | 0/? | Not started | - |
+| 1. Agent Core | 0/2 | Planned | - |
 | 2. Data Collection | 0/? | Not started | - |
 | 3. Agent Pipeline | 0/? | Not started | - |
 | 4. Frontend + SSE UX | 0/? | Not started | - |
