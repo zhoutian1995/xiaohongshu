@@ -1,602 +1,452 @@
-# AI 对标账号分析与内容生成工具 — 设计文档 v2.1
+# AI 对标账号分析与内容生成工具 — 设计文档 v3.0
 
 ## Context
 
-本地生活商家（美业、餐饮、健身、医美等）想做小红书账号，但不知道怎么定位、怎么写内容。目前行业内代运营团队的手动流程是：找对标账号 → 分析账号定位和内容 → 拆解脚本框架 → 为客户设计内容策略。这个过程纯手动，耗时耗力，且高度依赖个人经验。
-
-本工具的目标是将这个手动流程自动化：用户填写门店情况问卷，工具自动找到 3-5 个高质量同城商家对标账号，输出证据型账号拆解和首周可拍脚本。
+本地生活商家（美业、餐饮、健身、医美等）想做小红书账号，但不知道怎么定位、怎么写内容。本工具将手动流程自动化：用户填写门店问卷，系统启动 AI Agent 在沙盒中自主完成对标账号发现、深度分析、脚本拆解和内容策略生成。
 
 ### 核心原则
 
-- **证据驱动：** 每个分析结论都必须附带来源（哪篇笔记、哪条评论、哪个数据指标），不做无源结论
-- **可执行优先：** 输出内容必须能直接指导拍摄和发布，拒绝泛化方案
-- **合规边界：** 竞品内容仅用于分析学习，不直接复制他人的图片、视频、文案作为商用素材
+- **证据驱动：** 每个分析结论都必须附带来源，不做无源结论
+- **可执行优先：** 输出内容必须能直接指导拍摄和发布
+- **合规边界：** 竞品内容仅用于分析学习，不直接复制他人的图片、视频、文案
 
 ## MVP 范围
 
 输入：城市 + 行业 + 门店情况问卷
 ↓
-输出：3-5 个高质量对标账号的**证据型拆解** + **首周 2 条可拍脚本**（快速模式）+ **7 天启动计划** + **10 个选题池**
+Agent 自主规划并执行：发现对标 → 分析账号 → 拆解脚本 → 生成策略
+↓
+输出：3-5 个对标账号的**证据型拆解** + **首周 2 条可拍脚本** + **7 天启动计划** + **10 个选题池**
 
 MVP 不做：30 天日历、完整策略报告、用户系统、数据导出、内容自动发布。
 
-## 产品定位
-
-- **形态：** Web 应用（单页工作台）
-- **用户：** 先自己用（MVP），后续可扩展
-- **核心体验：** 全自动流水线 — 填好问卷一键启动，实时查看分析进度和结果
-
-## 技术栈
-
-| 层 | 技术 | 说明 |
-|---|---|---|
-| 前端 | Next.js 15 (App Router) | 全栈框架 |
-| UI | Tailwind CSS + shadcn/ui | 快速搭建，够用即可 |
-| 后端 | Next.js API Routes + Job Worker | API + 后台任务 + SSE 推送 |
-| 数据采集 | xhs-mcp (ShunL12324/xhs-mcp) | 小红书 MCP 服务器，Playwright + 真实浏览器 |
-| AI | Claude API (@anthropic-ai/sdk) | 账号分类、分析、脚本拆解、内容生成 |
-| 语言 | TypeScript | 全栈统一 |
-| 数据存储 | SQLite (better-sqlite3) | 项目、任务状态、分析结果、缓存 |
-
-## 数据采集方案：xhs-mcp
-
-### 为什么选 xhs-mcp
-
-- **降低自动化特征：** 用真实浏览器 + 扫码登录，行为接近真人操作，比传统爬虫（直接调内部 API）更不易被风控识别。但**不等于完全安全或合规**
-- **功能全：** 搜索笔记、获取笔记详情、用户资料、评论数据
-- **技术匹配：** TypeScript + Bun + Playwright + SQLite，和主项目技术栈一致
-- **风控保护：** 内置请求间隔控制（`XHS_MCP_REQUEST_INTERVAL`），多账号管理
-
-### 风险与合规
-
-| 风险 | 说明 | 应对措施 |
-|------|------|---------|
-| 账号风控 | 自动化操作可能触发平台风控 | 使用小号；请求间隔 ≥ 2s；单次任务控制在 3-5 个账号 |
-| 平台条款 | 自动化采集可能违反用户协议 | 仅用于个人学习分析；不批量采集；不商用他人内容 |
-| 数据使用 | 采集到的他人内容有版权 | 分析结论可参考，但不直接复制图片、视频、文案作为自己的发布内容 |
-| 任务失败 | 网络波动、登录过期等导致中断 | 设计断点续跑、失败重试、本地缓存（见任务可靠性设计） |
-
-### 使用的 xhs-mcp 工具
-
-| 阶段 | 工具 | 用途 |
-|------|------|------|
-| 对标发现 | `xhs_search` | 关键词搜索笔记 |
-| 对标发现 | `xhs_user_profile` | 获取用户资料和笔记列表 |
-| 账号分析 | `xhs_user_profile` | 获取用户详情 |
-| 账号分析 | `xhs_get_note` | 获取笔记详情和评论（用于证据绑定） |
-
-**注意：MVP 不下载图片/视频。** 减少调用量，降低风控风险，也避免版权问题。
-
-## 架构
+## 架构：Web 控制台 + 后端沙盒 Agent 执行
 
 ```
-┌──────────────────────────────────────────────────┐
-│              Next.js App (单页面)                   │
-│  ┌──────────────┐  ┌─────────────────────────┐   │
-│  │ 门店情况问卷  │  │      结果展示面板         │   │
-│  │ - 行业/城市   │  │  ① 对标账号发现          │   │
-│  │ - 结构化问卷  │  │  ② 账号深度分析          │   │
-│  │ - 模式选择    │  │  ③ 脚本框架拆解          │   │
-│  │ [启动]       │  │  ④ 首周脚本生成          │   │
-│  └──────────────┘  └─────────────────────────┘   │
-└────────────────┬─────────────────────────────────┘
+┌────────────────────────────────────────────────────────┐
+│                  Frontend (Web 控制台)                    │
+│  ┌──────────────┐  ┌──────────────────────────────┐    │
+│  │ 门店情况问卷  │  │     Agent Timeline 进度面板     │    │
+│  │ [提交任务]   │  │  🔍 searching → 📊 analyzing  │    │
+│  │              │  │  → 📝 generating → ✅ validating│    │
+│  └──────────────┘  └──────────────────────────────┘    │
+└────────────────┬──────────────────────────────────────┘
                  │ REST API（创建/查询任务）+ SSE（实时进度）
-┌────────────────┼─────────────────────────────────┐
-│              Job Runner (后台任务引擎)               │
-│                                                  │
-│  ┌──────────────────────────────────────────┐    │
-│  │ 状态机: queued → running → completed/error │    │
-│  │ 断点续跑 + 失败重试 + 本地缓存             │    │
-│  └──────────────────────────────────────────┘    │
-│                                                  │
-│  ① 发现 → ② 分类评分 → ③ 拆解 → ④ 生成         │
-│     │         │            │         │           │
-│  xhs_search  Claude     Claude    Claude API    │
-│  xhs_user    (分类器)    (分析)    (生成脚本)     │
-│  _profile    (评分模型)  (证据)                   │
-└────────────────┴─────────────────────────────────┘
+┌────────────────┼──────────────────────────────────────┐
+│            API Server (Next.js API Routes)               │
+│  POST /api/jobs  → 创建任务，返回 jobId                  │
+│  GET  /api/jobs/[id]  → 查询任务状态和结果                │
+│  GET  /api/jobs/[id]/stream  → SSE 实时进度推送           │
+└────────────────┬──────────────────────────────────────┘
+                 │
+┌────────────────┼──────────────────────────────────────┐
+│           Agent Scheduler (独立 Worker 进程)              │
+│  ┌──────────────────────────────────────────────────┐   │
+│  │ 轮询 queued 任务 → 启动沙盒 → 监控状态 → 处理结果  │   │
+│  └──────────────────────────────────────────────────┘   │
+│                         ↓ spawn                         │
+│  ┌──────────────────────────────────────────────────┐   │
+│  │          Sandbox Runtime (子进程隔离)               │   │
+│  │  ┌────────────────────────────────────────────┐  │   │
+│  │  │         Agent Worker (AI Agent)              │  │   │
+│  │  │                                              │  │   │
+│  │  │  System Prompt → 规划任务 → 调用工具 → 写产物  │  │   │
+│  │  │                                              │  │   │
+│  │  │  Tools:                                      │  │   │
+│  │  │  ├── xhs_search      搜索小红书笔记           │  │   │
+│  │  │  ├── xhs_user_profile 获取用户资料            │  │   │
+│  │  │  ├── xhs_get_note    获取笔记详情             │  │   │
+│  │  │  ├── analyze_account AI 分析账号（证据绑定）   │  │   │
+│  │  │  ├── breakdown_scripts AI 拆解脚本            │  │   │
+│  │  │  ├── generate_content AI 生成内容策略         │  │   │
+│  │  │  ├── save_artifact   保存结构化产物           │  │   │
+│  │  │  └── report_progress 报告当前进度             │  │   │
+│  │  └────────────────────────────────────────────┘  │   │
+│  └──────────────────────────────────────────────────┘   │
+│                         ↓                                │
+│  ┌──────────────────────────────────────────────────┐   │
+│  │         Artifact Validator (产物校验)              │   │
+│  │  检查：账号数量、证据引用、脚本数量、合规边界        │   │
+│  │  失败 → 最多修复 1 次                              │   │
+│  └──────────────────────────────────────────────────┘   │
+└────────────────┬──────────────────────────────────────┘
+                 │
+┌────────────────┴──────────────────────────────────────┐
+│                  Database (SQLite)                       │
+│  jobs · artifacts · tool_calls · timeline_events · cache │
+└─────────────────────────────────────────────────────────┘
 ```
 
 ### 核心组件
 
-1. **Job Runner** — 后台任务引擎，独立于 API 请求生命周期运行。包含任务表、状态机、重试机制、本地缓存
-2. **xhs-mcp Integration** — 通过 `@modelcontextprotocol/sdk` 作为 MCP Client 连接 xhs-mcp Server，封装工具调用
-3. **Claude Analyzer** — 封装 Claude API，每个阶段设计专用 prompt，输出结构化 JSON + 证据引用
-4. **Storage** — SQLite 存储项目、任务状态、分析结果、采集缓存
+| 组件 | 职责 |
+|------|------|
+| **Agent Scheduler** | 独立 Worker 进程，轮询任务队列，为每个任务 spawn 沙盒子进程 |
+| **Sandbox Executor** | 子进程隔离，管理 Agent Worker 的生命周期（启动、超时、异常退出） |
+| **Agent Worker** | AI Agent（Claude Tool Use），根据 System Prompt 自主规划并调用工具 |
+| **Tool Registry** | 注册 Agent 可调用的工具，定义输入/输出 schema、限流、调用预算 |
+| **Artifact Validator** | 校验 Agent 产出的结构化 JSON，不通过则触发修复 |
+| **Trace Store** | 记录每次 tool call、artifact checkpoint、sandbox 日志、budget 用量 |
+| **Storage** | SQLite 存储任务状态、产物、时间线事件、缓存 |
 
-### 为什么不用 API Route 直接跑 Pipeline
+### Agent 运行流程
 
-浏览器自动化（Playwright）和 Claude 多轮分析都是长任务（可能 5-15 分钟），不适合塞在 Next.js API Route 的请求生命周期里。Job Runner 模式下：
-- 前端创建任务 → 立即返回 jobId
-- 后台 worker 执行任务 → 更新数据库状态
-- 前端通过 SSE 订阅进度 → 实时展示
+```
+1. create_job        用户提交任务 → DB 写入 job(status=queued)
+2. spawn_sandbox     Scheduler 检测到任务 → 启动子进程 → Agent Worker 初始化
+3. agent_plans       Agent 收到 System Prompt + 门店问卷 → 自主规划工具调用序列
+4. agent_executes    Agent 按规划调用工具，每次 tool call 记录到 Trace Store
+5. write_artifacts   Agent 调用 save_artifact 保存结构化产物到 DB
+6. validate          Artifact Validator 检查产物完整性
+7. repair (optional) 校验失败 → Agent 收到错误信息 → 修复 → 重新校验（最多 1 次）
+8. complete          校验通过 → job(status=completed) → SSE 推送完成
+   或 error          超时/崩溃/修复失败 → job(status=error) → SSE 推送错误
+```
 
 ## 用户输入：结构化门店问卷
 
-不使用自由文本输入，改为结构化问卷，确保 AI 能生成精准策略：
+（与 v2.1 相同，保持不变）
 
 ```typescript
 interface StoreProfile {
-  // 基础信息
-  industry: string         // "美甲"
-  city: string             // "深圳"
-  district?: string        // "南山区"
-  storeName: string        // 店铺名称
-
-  // 定价与客群
-  priceRange: string       // "100-300元" / 客单价
-  targetAudience: string   // "25-35岁白领女性"
-  businessArea: string     // "科技园商圈" / 写字楼密集区
-
-  // 能力与素材
-  specialties: string[]    // ["日式美甲", "建构", "手绘"]
-  realAdvantages: string[] // ["10年经验", "进口甲油", "无隐形消费"]
-  filmableAssets: string[] // ["工作台", "作品展示墙", "前后对比图"]
-  onCamera: boolean        // 老板/员工是否出镜
-  onCameraInfo?: string    // 出镜人员特点（如"老板本人，亲和力强"）
-
-  // 运营情况
-  postFrequency: string    // "每周3-4篇" / 可承接频率
-  existingAccount?: string // 已有账号链接（可选）
-  forbiddenTopics?: string[] // 禁忌表达（如"不提价格战"）
-
-  // 转化方式
-  conversionMethod: string // "私信预约" / "群聊转化" / "到店团购"
+  industry: string
+  city: string
+  district?: string
+  storeName: string
+  priceRange: string
+  targetAudience: string
+  businessArea: string
+  specialties: string[]
+  realAdvantages: string[]
+  filmableAssets: string[]
+  onCamera: boolean
+  onCameraInfo?: string
+  postFrequency: string
+  existingAccount?: string
+  forbiddenTopics?: string[]
+  conversionMethod: string
 }
 ```
 
-## 四个阶段详细设计
+## Tool Registry
 
-### 阶段 1：对标账号发现 + 分类
+Agent 可调用的工具，每个工具有明确的输入/输出 schema、调用预算和限流：
 
-**输入：** 行业 + 城市 + 门店问卷
+### 数据采集工具
 
-**流程：**
+| 工具 | 输入 | 输出 | 预算 | 限流 |
+|------|------|------|------|------|
+| `xhs_search` | `{ keyword: string, limit?: number }` | `{ notes: SearchResult[] }` | 快速 ≤ 6 次，深度 ≤ 12 次 | ≥ 2s 间隔 |
+| `xhs_user_profile` | `{ userId: string }` | `{ profile: UserProfile }` | 快速 ≤ 15 次，深度 ≤ 50 次 | ≥ 2s 间隔 |
+| `xhs_get_note` | `{ noteId: string, xsecToken: string }` | `{ note: NoteDetail }` | 快速 ≤ 30 次，深度 ≤ 100 次 | ≥ 2s 间隔 |
 
-**1a. 多关键词组合搜索**
+### AI 分析工具
 
-单一关键词搜索候选池质量不稳定，尤其美甲、医美、健身等竞争词会混入大量达人和合集。使用关键词组合策略扩大覆盖、提高精准度：
+| 工具 | 输入 | 输出 | 预算 | 限流 |
+|------|------|------|------|------|
+| `analyze_account` | `{ profile, notes, storeProfile }` | `{ AccountAnalysis }` 证据绑定 | ≤ 10 次 | ≥ 1s 间隔 |
+| `breakdown_scripts` | `{ hitNotes, avgNotes }` | `{ BreakdownResult }` | ≤ 10 次 | ≥ 1s 间隔 |
+| `generate_content` | `{ storeProfile, accounts, breakdown, scriptCount }` | `{ ContentStrategy }` | ≤ 3 次 | ≥ 1s 间隔 |
+
+### 系统工具
+
+| 工具 | 输入 | 输出 | 说明 |
+|------|------|------|------|
+| `save_artifact` | `{ type: string, data: JSON }` | `{ artifactId }` | 保存结构化产物到 DB |
+| `report_progress` | `{ phase: string, message: string }` | `{ ok }` | 向前端报告进度 |
+
+### 工具调用预算（单任务上限）
+
+| 维度 | 快速模式 | 深度模式 |
+|------|---------|---------|
+| xhs_search 调用 | ≤ 6 次 | ≤ 12 次 |
+| xhs_user_profile 调用 | ≤ 15 次 | ≤ 50 次 |
+| xhs_get_note 调用 | ≤ 30 次 | ≤ 100 次 |
+| analyze_account 调用 | ≤ 10 次 | ≤ 15 次 |
+| Claude tokens 总量 | ≤ 80K | ≤ 200K |
+| 候选账号数 | ≤ 12 个 | ≤ 50 个 |
+| 最终对标数 | 3 个 | 5 个 |
+| 生成脚本数 | 2 条 | 3 条 |
+| 总耗时上限 | 8 分钟 | 15 分钟 |
+
+## Artifact Contract
+
+Agent 最终必须产出的结构化 JSON：
+
+### artifact: benchmark_accounts
 
 ```typescript
-// 基于门店问卷自动生成搜索关键词组合
-function generateSearchKeywords(profile: StoreProfile): string[] {
-  const keywords: string[] = [
-    `${profile.city}${profile.industry}`,           // "深圳美甲"
-    `${profile.industry}推荐`,                       // "美甲推荐"
-    `${profile.industry}避雷`,                       // "美甲避雷"（了解反面案例）
-    `${profile.industry}${profile.priceRange}`,      // "美甲 100-300"
-    ...profile.specialties.map(s => `${profile.industry}${s}`), // "美甲建构"
-  ]
-  // 有 district 才生成商圈/区级关键词
-  if (profile.district) {
-    keywords.push(`${profile.district}${profile.industry}`) // "南山区美甲"
-  }
-  return keywords
+interface BenchmarkAccountArtifact {
+  accounts: {
+    userId: string
+    nickname: string
+    followers: number
+    notesCount: number
+    accountType: 'merchant' | 'influencer' | 'deal' | 'user' | 'brand'
+    classificationMethod: 'rule' | 'ai'
+    classificationEvidence: string
+    score: BenchmarkScore
+    notes: Note[]
+  }[]
 }
 ```
 
-对每组关键词执行 `xhs_search`，合并去重后得到候选账号列表。
-
-**1b. 账号分类器（规则预筛 + AI 精分）**
-
-纯 AI 分类成本高且容易被少量笔记误导。采用"规则预筛 → AI 精分"两阶段：
-
-**第一步：硬规则预筛**（不需要调用 Claude，零成本）
+### artifact: account_analysis
 
 ```typescript
-function preFilterAccount(profile: xhs_user_profile, notes: Note[]): AccountType | 'uncertain' {
-  const bio = profile.bio.toLowerCase()
-  const nickname = profile.nickname
-
-  // 强特征 → 直接判定
-  if (bio.includes('预约') || bio.includes('地址') || bio.includes('营业'))
-    return 'merchant'          // 简介有地址/预约/营业时间 → 商家号
-  if (bio.includes('探店') || bio.includes('合作'))
-    return 'influencer'        // 简介有探店/合作 → 达人号
-  if (isInstitutionName(nickname))
-    return 'brand'             // 机构名/品牌名 → 品牌号
-  if (notesHaveSameStore(notes))
-    return 'merchant'          // 笔记反复出现同一门店 → 商家号
-  if (notesAllDeals(notes))
-    return 'deal'              // 笔记全是团购 → 团购号
-
-  return 'uncertain'           // 无法判定 → 交给 AI
+interface AccountAnalysisArtifact {
+  accounts: {
+    userId: string
+    analysis: {
+      positioning: string
+      targetAudience: string
+      differentiation: string
+      contentTypes: ContentTypeDistribution[]
+      postingFrequency: string
+      hitPatterns: string[]
+      evidenceList: AnalysisConclusion[]  // 每个结论必须带证据
+    }
+  }[]
 }
 ```
 
-**第二步：AI 精分**（仅对 `uncertain` 的账号调用 Claude）
-
-```
-账号类型分类：
-├── 商家自营号  ← 我们要找的主要目标
-├── 达人探店号  ← 排除（运营逻辑完全不同）
-├── 团购引流号  ← 排除（低质量内容）
-├── 素人种草号  ← 可参考但不作为对标
-└── 品牌/聚合营销号  ← 排除（资源不对等）
-```
-
-**1c. 筛选商家自营号作为候选**
-
-**输出：** 分类后的账号列表（标注每个账号的类型 + 分类依据 + 判定方式：规则/AI）
-
-### 阶段 2：对标评分 + 深度分析
-
-**输入：** 商家自营号候选列表
-
-**流程：**
-
-**2a. 对标评分模型**
-
-不再使用"粉丝量 × 互动率"，改用多维评分：
+### artifact: script_breakdown
 
 ```typescript
-interface BenchmarkScore {
-  // 同城相关性（该账号的内容是否服务于同城客户）
-  localRelevance: number    // 0-10
-
-  // 行业相关性（内容是否和我们行业高度重叠）
-  industryRelevance: number // 0-10
-
-  // 内容活跃度（近 30/90 天是否持续发布）
-  activityScore: number     // 0-10
-
-  // 近期爆款率（近 30 天内有多少篇笔记超过平均互动）
-  recentHitRate: number     // 0-10
-
-  // 咨询评论密度（评论中咨询/预约类评论占比，反映转化意图）
-  consultCommentRate: number // 0-10
-
-  // 低粉高赞样本（是否有低粉时期的爆款，说明内容本身有价值）
-  hasOrganicHits: boolean
-
-  // 可学习性（内容模式是否可复制，还是依赖大量预算/明星资源）
-  learnability: number      // 0-10
-
-  // 综合分（加权平均）
-  overallScore: number      // 0-100
-}
-
-// 默认权重定义
-const SCORE_WEIGHTS = {
-  localRelevance:      0.25,   // 同城相关性 25%（本地生活核心指标）
-  industryRelevance:   0.20,   // 行业相关性 20%
-  consultCommentRate:  0.20,   // 咨询评论密度 20%（反映真实转化）
-  activityScore:       0.15,   // 活跃度 15%
-  recentHitRate:       0.10,   // 近期爆款率 10%
-  learnability:        0.10,   // 可学习性 10%
-} // 总计 100%
-```
-
-**评分计算逻辑：** `overallScore = Σ(score[i] × weight[i]) × 10`（各维度 0-10 分，加权后映射到 0-100）
-
-按综合分排序 → 取 **Top 3-5**（不是 10 个）。
-
-**2b. 深度分析（对每个对标账号）**
-
-采集近 15-20 篇笔记 + 评论样本，Claude API 分析：
-- 账号定位（人设标签、目标人群、差异化卖点）
-- 内容类型分布（教程/对比/日常/测评占比）
-- 发布频率和时间规律
-- 互动数据趋势
-- 爆款笔记共性
-
-**关键：证据绑定。** 每个分析结论必须引用来源：
-
-```json
-{
-  "conclusion": "该账号以'对比类'内容为核心差异化，占比 45%",
-  "evidence": [
-    {"noteId": "xxx", "title": "300元 vs 3000元美甲对比", "type": "对比"},
-    {"noteId": "yyy", "title": "美团店 vs 私人工作室", "type": "对比"},
-    {"noteId": "zzz", "title": "Gel vs 甲油胶终极对比", "type": "对比"}
-  ],
-  "metric": "对比类 9/20 篇 = 45%，平均点赞 1200，高于教程类平均 600"
+interface ScriptBreakdownArtifact {
+  breakdowns: {
+    userId: string
+    hitPatterns: ScriptPattern[]
+    averagePatterns: ScriptPattern[]
+    differenceFactors: DifferenceFactor[]
+    reusableTemplates: ScriptTemplate[]
+  }[]
 }
 ```
 
-**证据引用规则：**
-- 引用笔记标题、数据指标、URL、摘要（一句话概括），**不引用大段原文**
-- 脚本生成时的原则是**"学习结构，不复用表达"** — 分析竞品的脚本框架和选题逻辑，但不复制具体文案、标题、封面设计
-- 这样既保证结论可追溯，又降低版权和平台风险
+### artifact: content_strategy
 
-**输出：** 带证据引用的账号分析报告
-
-### 阶段 3：脚本框架拆解
-
-**输入：** 每个对标账号的笔记数据
-
-**流程：**
-1. **对比拆解：** 对每个账号，同时拆解"爆款笔记"（互动 Top 5）和"普通笔记"（互动 Bottom 5），找差异因子：
-
-```
-爆款特征 vs 普通特征 对比：
-- 标题：爆款用"数字+对比句式"，普通用"描述性标题"
-- 钩子：爆款前 2 行有明确痛点/利益点，普通直接进入教程
-- 封面：爆款用"对比拼图/前后对比"，普通用"成品展示"
-- CTA：爆款结尾有明确引导（"评论区告诉我"），普通无
+```typescript
+interface ContentStrategyArtifact {
+  positioning: string
+  positioningEvidence: EvidenceReference[]
+  weekPlan: DayPlan[]
+  topicPool: Topic[]
+  scripts: ShootableScript[]
+  tagLibrary: TagCategory[]
+}
 ```
 
-2. 归纳出 3-5 套可复用的脚本模板，每套附证据来源
+## Artifact Validator
 
-**输出：** 带差异分析的脚本模板库，每个模板标注适用场景 + 参考笔记
+Agent 保存产物后，自动校验：
 
-### 阶段 4：首周脚本生成
+| 检查项 | 规则 | 失败处理 |
+|--------|------|---------|
+| 对标账号数量 | ≥ 3 个 merchant 类型账号 | 触发修复：Agent 扩大搜索范围 |
+| 证据引用 | 每个分析结论 ≥ 2 个证据 | 触发修复：Agent 补充证据 |
+| 脚本数量 | ≥ 2 条可拍脚本 | 触发修复：Agent 补充脚本 |
+| 拍摄清单 | 每条脚本有 shootingChecklist | 触发修复：Agent 补充 |
+| 合规边界 | 无直接复制的竞品文案 | 触发修复：Agent 重写 |
+| 参考笔记 | 每条脚本有 referenceNotes | 触发修复：Agent 补充 |
 
-**输入：** 门店问卷 + 前三个阶段的分析结果
+修复规则：校验失败 → 将 validation errors + 当前已有 artifacts 发给 Agent（不重新 spawn，复用已有 cache/tool_calls）→ Agent 只修复缺失/不合规的 artifact → 重新校验 → **最多修复 1 次** → 仍不通过则标记 error 并输出已有结果。
 
-**流程：**
-Claude API 综合生成：
+## Sandbox Model
 
-1. **账号定位建议**（结合用户优势和竞品空缺，附对标依据）
-2. **7 天启动计划**（每天拍什么、怎么拍、谁出镜、门店怎么配合）
-3. **10 个选题池**（从对标账号的爆款共性中提取，标注来源）
-4. **2-3 条可直接拍摄的脚本**（快速模式 2 条，深度模式 3 条；标题、封面描述、正文逐字稿、拍摄清单、话题标签）
+> **注意：** child_process 是**故障隔离**（Agent 崩溃不影响主进程），不是安全隔离。真正的安全边界是 Tool White List（Agent 只能调用注册的工具）+ 预算限制 + 超时。child_process 无法防御任意代码执行风险——这在 MVP 阶段可接受，生产环境需升级为 Docker 容器或 VM 沙盒。
 
-**关键约束：**
-- 每条脚本必须标注参考了哪些对标账号的哪些笔记
-- 脚本内容必须基于门店问卷的真实素材和条件（出镜人、可拍场景等）
+| 维度 | 设计 |
+|------|------|
+| 工作目录 | 每个任务独立目录：`/tmp/xhs-agent/{jobId}/` |
+| 环境变量白名单 | `ANTHROPIC_API_KEY`、`XHS_MCP_DATA_DIR`、`DATABASE_PATH`、`JOB_ID` |
+| 超时 | 快速模式 8 分钟，深度模式 15 分钟，超时自动 SIGTERM |
+| 进程限制 | 单任务最多 2 个子进程（Agent + xhs-mcp） |
+| 日志采集 | stdout/stderr 重定向到 `{workDir}/agent.log`，写入 DB |
+| 退出码 | 0=正常完成，1=Agent 错误，2=超时，3=预算超限 |
+| 内存 | 无硬限制（MVP 自己用），后续可加 cgroup |
+
+## Agent System Prompt
+
+```
+你是一个小红书对标账号分析 Agent。
+
+## 任务
+根据用户提供的门店信息，自主完成以下目标：
+1. 发现 3-5 个高质量同城商家对标账号
+2. 深度分析账号定位、内容策略、脚本框架
+3. 生成可执行的首周内容策略和脚本
+
+## 可用工具
+- xhs_search: 搜索小红书笔记（输入关键词，返回笔记列表）
+- xhs_user_profile: 获取用户资料和笔记列表
+- xhs_get_note: 获取笔记详情
+- analyze_account: AI 深度分析账号（带证据绑定）
+- breakdown_scripts: AI 拆解脚本框架（爆款 vs 普通对比）
+- generate_content: AI 生成内容策略和脚本
+- save_artifact: 保存结构化结果到数据库
+- report_progress: 向前端报告当前进度
+
+## 执行策略（参考顺序，可自主调整）
+以下是一个典型执行顺序，**你可以根据实际情况调整**——比如搜索结果不够就多搜几次，某个账号分析失败就跳过，发现新的细分方向就深入挖掘。
+1. 先用 xhs_search 搜索多个关键词组合，收集候选账号
+2. 用 xhs_user_profile 获取候选账号详情
+3. 先用硬规则预筛账号类型（简介含"预约/地址"→商家号，含"探店"→达人号）
+4. 不确定的账号可以用 analyze_account 辅助判断
+5. 筛选 merchant 类型，按评分排序取 Top 3-5
+6. 对每个对标账号调用 analyze_account 做证据型分析
+7. 调用 breakdown_scripts 做爆款 vs 普通对比拆解
+8. 调用 generate_content 生成内容策略
+9. 调用 save_artifact 保存所有结果
+10. 调用 report_progress 报告完成
+
+**约束：** 无论你如何调整顺序，最终必须满足 Artifact Contract（4 类产物齐全）和预算限制。自主性体现在策略选择，不是绕过约束。
+
+## 账号分类规则
+- 简介含"预约/地址/营业"→ merchant
+- 简介含"探店/合作"→ influencer（排除）
+- 机构名/品牌名 → brand（排除）
+- 笔记反复出现同一门店 → merchant
+- 笔记全是团购 → deal（排除）
+
+## 评分权重（快速模式）
+同城相关性 25% | 行业相关性 20% | 代理咨询密度 10% | 活跃度 25% | 爆款率 10% | 可学习性 10%
+
+## 证据规则
+- 每个分析结论必须引用来源（noteId + title + 数据指标）
+- 只引用标题、指标、URL、摘要，不引用大段原文
+- 脚本生成：学习结构，不复用表达
+
+## 合规边界
+- 不复制竞品的具体文案、标题、封面设计
+- 脚本必须基于门店真实素材和条件
 - 不生成门店无法执行的脚本
 
-**输出：** 可直接执行的拍摄指南 + 脚本逐字稿
+## 预算限制
+- 搜索次数 ≤ 6，候选账号 ≤ 12，最终对标 3 个
+- 每账号分析 10 篇笔记
+- 生成 2 条可拍脚本
+- 总耗时 ≤ 8 分钟
+```
 
 ## 数据模型
 
 ```typescript
-// 项目：一次完整的对标分析任务
-interface Project {
+// 任务
+interface Job {
   id: string
-  storeProfile: StoreProfile     // 结构化门店问卷
-  mode: 'fast' | 'deep'          // 快速模式/深度模式
-  status: 'queued' | 'running' | 'paused' | 'completed' | 'error'
-  currentPhase: number           // 当前阶段（支持断点续跑）
-  phases: PhaseResult[]
-  createdAt: Date
-  completedAt?: Date
+  storeProfile: StoreProfile
+  mode: 'fast' | 'deep'
+  runStatus: 'queued' | 'spawning' | 'running' | 'validating' | 'repairing' | 'completed' | 'error'
+  sandboxPid?: number
+  startedAt?: string
+  completedAt?: string
   errorMessage?: string
+  budget: {
+    searchesUsed: number
+    profilesUsed: number
+    notesUsed: number
+    claudeTokensUsed: number
+    toolCallsTotal: number
+    elapsedMs: number
+  }
 }
 
-// 对标账号
-interface BenchmarkAccount {
-  userId: string
-  nickname: string
-  avatar: string
-  followers: number
-  notesCount: number
-
-  // 账号分类
-  accountType: 'merchant' | 'influencer' | 'deal' | 'user' | 'brand'
-  classificationEvidence: string  // 分类依据（引用了哪些笔记/数据）
-
-  // 运营指标
-  notesLast30d: number           // 近 30 天发布数
-  notesLast90d: number           // 近 90 天发布数
-  avgLikes: number
-  avgComments: number
-  avgFavorites: number
-  avgShares: number
-  collectToLikeRatio: number     // 收藏/点赞比（反映内容实用价值）
-  consultCommentRate: number     // 咨询评论密度
-
-  // 评分
-  score: BenchmarkScore
-
-  // 分析结果
-  positioning: string            // 账号定位（附证据）
-  contentTypes: ContentType[]    // 内容类型分布（附证据）
-  analysis: AccountAnalysis      // 完整分析（附证据）
+// 产物
+interface Artifact {
+  id: string
+  jobId: string
+  type: 'benchmark_accounts' | 'account_analysis' | 'script_breakdown' | 'content_strategy'
+  data: string  // JSON string
+  createdAt: string
+  validationResult?: 'pass' | 'fail'
+  validationErrors?: string[]
+  repairAttempt?: number  // 0=首次, 1=修复后
 }
 
-// 笔记（完整运营字段）
-interface Note {
-  noteId: string
-  noteUrl: string                // 原始链接
-  title: string
-  content: string
-  type: 'image' | 'video'        // 笔记类型
-  mediaCount: number             // 图片/视频数量
-
-  // 互动数据
-  likes: number
-  comments: number
-  favorites: number
-  shares: number
-
-  // 内容标签
-  tags: string[]
-  isCollection: boolean          // 是否合集
-  isDeal: boolean                // 是否团购
-
-  // 时间
-  publishedAt: Date
-  collectedAt: Date              // 采集时间
-  dataFreshness: 'fresh' | 'stale' // 数据新鲜度
-
-  // 分类
-  performanceTier: 'hit' | 'average' | 'low'  // 爆款/普通/低表现
-
-  // 脚本拆解（可选）
-  scriptBreakdown?: ScriptBreakdown
-
-  // 评论样本（Top 10 热门评论）
-  commentSamples?: CommentSample[]
+// 工具调用记录
+interface ToolCall {
+  id: string
+  jobId: string
+  toolName: string
+  input: string   // JSON
+  output: string   // JSON
+  status: 'success' | 'error' | 'budget_exceeded'
+  errorMessage?: string
+  durationMs: number
+  budgetAfterCall: {    // 调用后的预算快照
+    searchesUsed: number
+    profilesUsed: number
+    notesUsed: number
+    claudeTokensUsed: number
+  }
+  createdAt: string
 }
 
-interface CommentSample {
-  content: string
-  likes: number
-  type: 'consult' | 'praise' | 'question' | 'other'  // 咨询/好评/提问/其他
-}
-
-// 脚本拆解
-interface ScriptBreakdown {
-  titleFormula: string
-  coverStyle: string
-  structure: string[]
-  hookTechnique: string
-  ctaTechnique: string
-  evidence: EvidenceReference[]  // 参考笔记
-}
-
-// 证据引用
-interface EvidenceReference {
-  noteId: string
-  title: string
-  url: string
-  relevantData?: string         // 相关数据点
-}
-
-// 生成的内容策略
-interface ContentStrategy {
-  // 账号定位
-  positioning: string
-  positioningEvidence: EvidenceReference[]
-
-  // 7 天启动计划
-  weekPlan: DayPlan[]
-
-  // 选题池
-  topicPool: Topic[]
-
-  // 可拍脚本
-  scripts: ShootableScript[]
-
-  // 话题标签库
-  tagLibrary: TagCategory[]
-}
-
-interface ShootableScript {
-  title: string
-  coverDescription: string       // 封面描述（怎么拍）
-  copy: string                   // 正文逐字稿
-  shootingChecklist: string[]    // 拍摄清单（需要什么道具/场景/人员）
-  tags: string[]                 // 话题标签
-  referenceNotes: EvidenceReference[]  // 参考了对标的哪些笔记
+// 时间线事件（SSE 推送）
+interface TimelineEvent {
+  id: string
+  jobId: string
+  type: 'job_started' | 'tool_called' | 'tool_completed' | 'artifact_saved' | 'validation_passed' | 'validation_failed' | 'repair_started' | 'job_completed' | 'job_error'
+  message: string
+  data?: string  // JSON
+  createdAt: string
 }
 ```
 
-## 任务可靠性设计
+## 数据采集方案：xhs-mcp
 
-### 快速模式 vs 深度模式
+（与 v2.1 相同，保持不变。xhs-mcp 作为 Agent 工具的后端实现，Agent 通过 `xhs_search`、`xhs_user_profile`、`xhs_get_note` 工具调用它。）
 
-| | 快速模式 | 深度模式 |
-|---|---|---|
-| 搜索笔记数 | 1 轮搜索 | 2-3 轮搜索（不同关键词组合） |
-| 候选账号数 | 8-12 个 | 30-50 个 |
-| 最终对标数 | 3 个 | 5 个 |
-| 每账号笔记数 | 10 篇 | 20 篇 |
-| 评论采集 | 不采集 | 采集 Top 10 评论文本 |
-| 脚本生成 | 2 条 | 3 条 |
-| 预计耗时 | 5-8 分钟 | 10-15 分钟 |
+风险控制措施不变：使用小号、请求间隔 ≥ 2s、MVP 不下载图片/视频。
 
-### 断点续跑
+## UI 进度展示
 
-- 每个阶段完成后，将中间结果写入 SQLite
-- 任务失败时记录失败阶段和错误信息
-- 重启任务时从失败阶段继续，不重复已完成的工作
-
-### 失败重试
-
-- 单次 xhs-mcp 调用失败 → 重试 3 次，间隔递增（2s → 4s → 8s）
-- Claude API 失败 → 重试 2 次
-- 单个账号分析失败 → 跳过该账号，继续处理其他账号
-- 全部账号失败 → 标记任务为 error，输出已收集的部分结果
-
-### 缓存
-
-- 同一账号 24 小时内不重复采集
-- 搜索结果缓存 1 小时
-- Claude API 分析结果缓存（相同输入不重复调用）
-
-### 限流
-
-- xhs-mcp 请求间隔 ≥ 2 秒
-- Claude API 请求间隔 ≥ 1 秒
-- 并发限制：同时只分析 1 个账号（串行）
-
-## 项目结构
+从 v2.1 的"4 阶段卡片"改为 **Agent Timeline**：
 
 ```
-xiaohongshu/
-├── src/
-│   ├── app/                        # Next.js App Router
-│   │   ├── page.tsx                # 主页面（单页工作台）
-│   │   ├── layout.tsx
-│   │   └── api/
-│   │       ├── jobs/
-│   │       │   └── route.ts        # 创建/查询任务
-│   │       └── jobs/[id]/
-│   │           └── stream/route.ts # SSE 进度推送
-│   ├── components/
-│   │   ├── StoreProfileForm.tsx    # 门店情况问卷表单
-│   │   ├── ResultPanel.tsx         # 结果展示面板
-│   │   ├── PhaseCard.tsx           # 阶段进度卡片
-│   │   ├── AccountCard.tsx         # 账号分析卡片（含证据引用）
-│   │   ├── ScriptCard.tsx          # 可拍脚本卡片
-│   │   └── EvidenceTag.tsx         # 证据引用标签组件
-│   ├── lib/
-│   │   ├── job-runner.ts           # 后台任务引擎（状态机 + 重试 + 断点）
-│   │   ├── rate-limiter.ts         # 限流器
-│   │   ├── cache.ts                # 缓存层
-│   │   ├── phases/
-│   │   │   ├── discover.ts         # 阶段 1：对标发现 + 分类
-│   │   │   ├── score.ts            # 阶段 2a：对标评分
-│   │   │   ├── analyze.ts          # 阶段 2b：深度分析（证据绑定）
-│   │   │   ├── breakdown.ts        # 阶段 3：脚本拆解（对比分析）
-│   │   │   └── generate.ts         # 阶段 4：首周脚本生成
-│   │   ├── xhs-client.ts           # xhs-mcp 客户端封装
-│   │   ├── claude.ts               # Claude API 封装
-│   │   ├── classifier.ts           # 账号分类器（Claude prompt）
-│   │   ├── scorer.ts               # 对标评分模型
-│   │   ├── db.ts                   # SQLite 数据库
-│   │   └── types.ts                # 类型定义
-│   └── prompts/                    # Claude prompt 模板
-│       ├── classify-account.ts     # 账号分类 prompt
-│       ├── analyze-account.ts      # 账号分析 prompt（含证据绑定指令）
-│       ├── breakdown-script.ts     # 脚本拆解 prompt（含对比分析指令）
-│       └── generate-script.ts      # 脚本生成 prompt（含约束条件）
-├── docs/
-│   └── superpowers/specs/
-├── package.json
-├── tailwind.config.ts
-└── tsconfig.json
+Timeline 实时事件流：
+━━━ 🔍 searching ━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  10:23:01  搜索"深圳美甲"，找到 45 条笔记
+  10:23:15  搜索"美甲推荐"，找到 38 条笔记
+  10:23:22  发现 12 个候选账号，开始分类...
+━━━ 📊 analyzing ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  10:23:45  筛选出 5 个商家自营号
+  10:24:01  正在分析 @深圳美甲小仙女...
+  10:24:30  正在分析 @NailArt_Lisa...
+  10:25:00  分析完成，发现 3 套可复用脚本模板
+━━━ 📝 generating ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  10:25:15  正在生成内容策略...
+  10:25:45  正在生成第 2 条脚本...
+━━━ ✅ validating ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  10:26:00  校验通过：3 个对标账号，2 条脚本，证据完整
+  10:26:02  ✅ 任务完成
 ```
+
+前端通过 SSE 接收 TimelineEvent，映射为 4 个阶段标签（searching / analyzing / generating / validating），但内部是 Agent 自主决策的事件流，不是固定阶段。
 
 ## 验证方案
 
-### 技术验收（能跑通）
+### 技术验收
 
-1. **xhs-mcp 连通性：** 扫码登录后，`xhs_search` 能返回结果
-2. **端到端快速模式：** 输入"深圳美甲" + 门店信息 → 5-8 分钟输出结果
-3. **SSE 推送：** 前端能实时看到各阶段进度
-4. **断点续跑：** 中断任务后重启，从失败阶段继续
+1. **Sandbox 隔离：** Agent 崩溃不影响主进程，退出码正确
+2. **SSE 推送：** 前端实时看到 Agent 的 tool call 和 progress 事件
+3. **Budget 守卫：** 超过调用预算时 Agent 自动停止
+4. **Validator：** 产物不通过时触发修复，最多 1 次
 
-### 运营验收（有用）
+### 运营验收
 
-1. **对标准确率 > 70%：** 找出的 3-5 个对标中，至少 70% 是真正的同城商家自营号
-2. **结论可追溯：** 每个分析结论都有 2-5 个来源笔记/评论/数据指标
-3. **脚本可拍摄：** 生成的脚本有明确的拍摄清单、出镜人员、场景要求
-4. **内容合规：** 生成内容不违反小红书社区规范和相关行业广告法规
-
-### 人工评分 Rubric（对生成的脚本逐条评分）
-
-对每条生成的脚本进行以下 5 维度评分，每项 1-5 分：
-
-| 维度 | 1 分 | 3 分 | 5 分 |
-|------|------|------|------|
-| **选题清晰度** | 和门店业务无关 | 有相关性但泛化 | 精准命中门店差异化卖点 |
-| **拍摄可行性** | 需要门店没有的资源/人员 | 基本可拍但需要额外准备 | 用门店现有素材/人员即可完成 |
-| **门店差异化** | 和同行内容同质化 | 有一定差异但不够突出 | 清晰传达"为什么选这家不选别家" |
-| **转化意图** | 无任何引导 | 有引导但生硬 | 自然引导到预约/咨询/到店 |
-| **平台合规** | 违反社区规范 | 边缘地带 | 完全合规，符合社区调性 |
-
-**通过标准：** 每条脚本总分 ≥ 20/25，全部脚本平均分 ≥ 22/25
+1. **对标准确率 > 70%：** 至少 70% 是真正的同城商家自营号
+2. **结论可追溯：** 每个分析结论有 2-5 个证据引用
+3. **脚本可拍摄：** 有明确拍摄清单、出镜人员、场景要求
+4. **人工评分 Rubric：** 每条脚本总分 ≥ 20/25，全部脚本平均分 ≥ 22/25
 
 ## 范围边界（MVP 不包含）
 
-- 30 天内容日历（后续迭代）
+- 30 天内容日历
 - 用户注册/登录系统
 - 数据导出（PDF/Excel）
 - 多项目管理
 - 内容自动发布到小红书
-- 付费功能/权限管理
-- 图片/视频下载和商用
+- Docker 容器沙盒（MVP 用子进程，后续可升级）
+- 多 LLM 切换（MVP 用 Claude，后续可扩展）
