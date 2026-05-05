@@ -95,7 +95,7 @@ jobs:
           pm2 delete xiaohongshu-worker 2>/dev/null || true
 
           pm2 start "npx next start -p 3002" --name xiaohongshu-web
-          pm2 start "npx tsx src/worker.ts" --name xiaohongshu-worker
+          pm2 start "bash -c 'set -a && source .env && set +a && npx tsx src/worker.ts'" --name xiaohongshu-worker
           pm2 save
 
           echo "Deploy complete!"
