@@ -4,7 +4,8 @@ export function middleware(request: NextRequest) {
   const apiKey = request.headers.get('x-api-key')
   const secret = process.env.API_SECRET_KEY
 
-  // If no secret configured, skip auth (allows local dev without env var)
+  // Local Mac mini mode defaults to no API secret. Do not set API_SECRET_KEY
+  // unless the API is put behind an auth scheme that also supports EventSource.
   if (!secret) {
     return NextResponse.next()
   }

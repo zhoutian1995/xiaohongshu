@@ -5,7 +5,7 @@ import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 async function main() {
   const transport = new StdioClientTransport({
     command: 'npx',
-    args: ['-y', '@sillyl12324/xhs-mcp@latest'],
+    args: ['-y', '@sillyl12324/xhs-mcp@2.7.0'],
     env: {
       PATH: process.env.PATH ?? '',
       HOME: process.env.HOME ?? '',

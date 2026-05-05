@@ -15,6 +15,8 @@ export function useJobStream(jobId: string | null) {
   const [isComplete, setIsComplete] = useState(false)
   const [isError, setIsError] = useState(false)
   const lastEventIdRef = useRef<number>(0)
+  const isCompleteRef = useRef(false)
+  const isErrorRef = useRef(false)
 
   useEffect(() => {
     if (!jobId) return
@@ -22,12 +24,18 @@ export function useJobStream(jobId: string | null) {
     setEvents([])
     setIsComplete(false)
     setIsError(false)
+    isCompleteRef.current = false
+    isErrorRef.current = false
     lastEventIdRef.current = 0
 
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null
 
     function connect() {
-      const es = new EventSource(`/api/jobs/${jobId}/stream`)
+      const after = lastEventIdRef.current
+      const streamUrl = after > 0
+        ? `/api/jobs/${jobId}/stream?after=${after}`
+        : `/api/jobs/${jobId}/stream`
+      const es = new EventSource(streamUrl)
 
       const eventTypes = [
         'job_started', 'tool_called', 'tool_completed', 'artifact_saved',
@@ -43,8 +51,16 @@ export function useJobStream(jobId: string | null) {
             const data = JSON.parse(e.data)
             lastEventIdRef.current = data.id ?? lastEventIdRef.current
             setEvents(prev => [...prev, data])
-            if (type === 'job_completed') { setIsComplete(true); es.close() }
-            if (type === 'job_error') { setIsError(true); es.close() }
+            if (type === 'job_completed') {
+              isCompleteRef.current = true
+              setIsComplete(true)
+              es.close()
+            }
+            if (type === 'job_error') {
+              isErrorRef.current = true
+              setIsError(true)
+              es.close()
+            }
           } catch { /* ignore parse errors */ }
         })
       }
@@ -52,7 +68,7 @@ export function useJobStream(jobId: string | null) {
       es.onerror = () => {
         es.close()
         // Auto-reconnect after 2s if not complete/error (INFRA-03)
-        if (!isComplete && !isError) {
+        if (!isCompleteRef.current && !isErrorRef.current) {
           reconnectTimer = setTimeout(connect, 2000)
         }
       }

@@ -22,6 +22,8 @@ export function spawnSandbox(
 
   return new Promise((resolve) => {
     const startTime = Date.now()
+    let timedOut = false
+    let settled = false
 
     // Environment variable whitelist (no ...process.env spread)
     const SANDBOX_ENV_KEYS = [
@@ -30,7 +32,7 @@ export function spawnSandbox(
       'LLM_MODEL', 'JOB_ID', 'JOB_MODE',
     ] as const
 
-    const env: Record<string, string | undefined> = {}
+    const env: Record<string, string> = {}
     for (const key of SANDBOX_ENV_KEYS) {
       const value = process.env[key]
       if (value !== undefined) {
@@ -45,7 +47,7 @@ export function spawnSandbox(
     // Spawn agent CLI entry point
     const child: ChildProcess = spawn('npx', ['tsx', 'src/bin/agent.ts', '--job-id', jobId], {
       cwd: process.cwd(),
-      env: env as any,
+      env: env as NodeJS.ProcessEnv,
       stdio: ['pipe', 'pipe', 'pipe'],
     })
 
@@ -64,34 +66,41 @@ export function spawnSandbox(
       logStream.write(str)
     })
 
+    const settle = (result: Omit<SandboxResult, 'durationMs'>) => {
+      if (settled) return
+      settled = true
+      logStream.close()
+      resolve({
+        ...result,
+        durationMs: Date.now() - startTime,
+      })
+    }
+
     // Timeout handler
     const timer = setTimeout(() => {
+      timedOut = true
       child.kill('SIGTERM')
       // Give it 5s to clean up, then force kill
       setTimeout(() => {
-        if (!child.killed) child.kill('SIGKILL')
+        if (!settled) child.kill('SIGKILL')
       }, 5000)
     }, timeoutMs)
 
     child.on('close', (code) => {
       clearTimeout(timer)
-      logStream.close()
-      resolve({
-        exitCode: code ?? 1,
+      settle({
+        exitCode: timedOut ? 2 : code ?? 1,
         stdout,
         stderr,
-        durationMs: Date.now() - startTime,
       })
     })
 
     child.on('error', (err) => {
       clearTimeout(timer)
-      logStream.close()
-      resolve({
+      settle({
         exitCode: 1,
         stdout,
         stderr: stderr + '\n' + err.message,
-        durationMs: Date.now() - startTime,
       })
     })
   })

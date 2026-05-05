@@ -1,7 +1,7 @@
 import OpenAI from 'openai'
-import { randomUUID } from 'crypto'
 import * as db from './db'
 import { getToolDefinitions, executeTool } from './tool-registry'
+import { disconnectXhs } from './xhs-client'
 import { BUILD_AGENT_SYSTEM_PROMPT } from '../prompts/agent-system'
 import type { Budget, BudgetLimits, StoreProfile, JobMode, ToolContext } from './types'
 import { FAST_MODE_LIMITS, DEEP_MODE_LIMITS } from './types'
@@ -25,7 +25,7 @@ export async function runAgent(jobId: string): Promise<void> {
   const storeProfile: StoreProfile = job.store_profile
   const mode: JobMode = job.mode
   const limits: BudgetLimits = mode === 'fast' ? FAST_MODE_LIMITS : DEEP_MODE_LIMITS
-  let budget: Budget = job.budget_json
+  const budget: Budget = job.budget_json
 
   const tools = getToolDefinitions()
   const systemPrompt = BUILD_AGENT_SYSTEM_PROMPT(storeProfile, mode, limits)
@@ -179,5 +179,7 @@ export async function runAgent(jobId: string): Promise<void> {
     }
   } catch (err: any) {
     db.insertTimelineEvent(jobId, 'job_error', `Agent error: ${err.message}`)
+  } finally {
+    await disconnectXhs()
   }
 }

@@ -2,6 +2,15 @@ This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-
 
 ## Getting Started
 
+## Local Mac mini mode
+
+This app is intended to run on the local Mac mini by default. Do not set
+`API_SECRET_KEY` for local-only use: browser `EventSource` streams cannot send
+an `x-api-key` header, so forcing that header breaks the timeline stream.
+
+If the API is exposed beyond localhost later, add cookie/session auth or an
+SSE-compatible token design before enabling a required API secret.
+
 First, run the development server:
 
 ```bash

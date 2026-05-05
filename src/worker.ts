@@ -1,11 +1,10 @@
 import * as db from './lib/db'
-const { claimNextJob, updateJobStatus, insertTimelineEvent, getJob, getArtifacts } = db
+const { claimNextJob, updateJobStatus, insertTimelineEvent, getJob } = db
 import { spawnSandbox } from './lib/sandbox-executor'
 import { validateJobArtifacts } from './lib/artifact-validator'
 import { FAST_MODE_LIMITS, DEEP_MODE_LIMITS } from './lib/types'
 
 const POLL_INTERVAL = 2000
-const MAX_REPAIR_ATTEMPTS = 1
 
 async function main() {
   const REQUIRED_ENV_VARS = ['ZHIPU_API_KEY', 'DATABASE_PATH'] as const

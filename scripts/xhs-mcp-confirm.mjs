@@ -5,7 +5,7 @@ import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 async function main() {
   const transport = new StdioClientTransport({
     command: 'npx',
-    args: ['-y', '@sillyl12324/xhs-mcp@latest'],
+    args: ['-y', '@sillyl12324/xhs-mcp@2.7.0'],
     env: {
       PATH: process.env.PATH ?? '',
       HOME: process.env.HOME ?? '',
@@ -33,7 +33,7 @@ async function main() {
     console.log('\n--- 测试搜索 ---')
     const searchResult = await client.callTool({
       name: 'xhs_search',
-      arguments: { keyword: '杭州皮肤管理', sort: 'general', noteType: '0' },
+      arguments: { keyword: '杭州皮肤管理', sort: 'general', noteType: 'all' },
     })
     const searchText = searchResult.content?.find(c => c.type === 'text')?.text || ''
     console.log('搜索结果:', searchText.slice(0, 300))
