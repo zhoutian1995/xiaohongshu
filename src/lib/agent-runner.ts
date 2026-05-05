@@ -10,7 +10,10 @@ const MAX_TOOL_ROUNDS = 50
 
 const client = new OpenAI({
   apiKey: process.env.ZHIPU_API_KEY,
-  baseURL: process.env.ZHIPU_BASE_URL ?? 'https://open.bigmodel.cn/api/coding/paas/v4',
+  // Force coding endpoint for Zhipu Coding Plan compatibility
+  baseURL: process.env.ZHIPU_BASE_URL?.includes('/coding/')
+    ? process.env.ZHIPU_BASE_URL
+    : 'https://open.bigmodel.cn/api/coding/paas/v4',
 })
 
 const LLM_MODEL = process.env.LLM_MODEL ?? 'glm-5-turbo'

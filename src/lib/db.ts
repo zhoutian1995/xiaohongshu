@@ -197,13 +197,13 @@ export function getTimelineEvents(jobId: string, afterId = 0): any[] {
 
 export function getCache(key: string): string | null {
   purgeExpired()
-  const row = getDb().prepare('SELECT value FROM cache WHERE key = ? AND expires_at > datetime("now")').get(key)
+  const row = getDb().prepare("SELECT value FROM cache WHERE key = ? AND expires_at > datetime('now')").get(key)
   return row ? (row as any).value : null
 }
 
 export function setCache(key: string, value: string, ttlSeconds: number): void {
   getDb().prepare(
-    'INSERT OR REPLACE INTO cache (key, value, expires_at) VALUES (?, ?, datetime("now", "+" || ? || " seconds"))'
+    "INSERT OR REPLACE INTO cache (key, value, expires_at) VALUES (?, ?, datetime('now', '+' || ? || ' seconds'))"
   ).run(key, value, ttlSeconds)
 }
 

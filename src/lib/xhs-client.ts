@@ -141,7 +141,7 @@ export async function xhsSearch(keyword: string, limit = 20): Promise<XhsSearchR
   const c = await getClient()
   const result = await c.callTool({
     name: 'xhs_search',
-    arguments: { keyword, sort: 'general', noteType: '0' },
+    arguments: { keyword, sort: 'general', noteType: 'all' },
   })
   const parsed = parseResult(result)
   return validateSearchResult(parsed)
@@ -187,7 +187,7 @@ export async function checkLoginStatus(): Promise<boolean> {
     // Try a minimal search to verify login state
     const result = await c.callTool({
       name: 'xhs_search',
-      arguments: { keyword: 'test', sort: 'general', noteType: '0' },
+      arguments: { keyword: 'test', sort: 'general', noteType: 'all' },
     })
     const parsed = parseResult(result)
     // If we get any response (even empty), login is valid
